@@ -1,0 +1,51 @@
+services:
+  api_gateway:
+    build: .
+    command: uvicorn services.api_gateway.app:app --host 0.0.0.0 --port 8000
+    environment:
+      IDENTITY_SERVICE_URL: http://identity_service:8003
+      CUSTOMERS_SERVICE_URL: http://customer_service:8001
+      WORKSHOP_SERVICE_URL: http://workshop_service:8002
+    ports:
+      - "8000:8000"
+    depends_on:
+      - identity_service
+      - customer_service
+      - workshop_service
+
+  identity_service:
+    build: .
+    command: uvicorn services.identity_service.app:app --host 0.0.0.0 --port 8003
+    environment:
+      IDENTITY_DB_PATH: /data/identity.db
+      IDENTITY_BOOTSTRAP_ADMIN_EMAIL: admin@villavis.test
+      IDENTITY_BOOTSTRAP_ADMIN_PASSWORD: password123
+    expose:
+      - "8003"
+    volumes:
+      - identity_data:/data
+
+  customer_service:
+    build: .
+    command: uvicorn services.customer_service.app:app --host 0.0.0.0 --port 8001
+    environment:
+      CUSTOMERS_DB_PATH: /data/customers.db
+    expose:
+      - "8001"
+    volumes:
+      - customer_data:/data
+
+  workshop_service:
+    build: .
+    command: uvicorn services.workshop_service.app:app --host 0.0.0.0 --port 8002
+    environment:
+      WORKSHOP_DB_PATH: /data/workshop.db
+    expose:
+      - "8002"
+    volumes:
+      - workshop_data:/data
+
+volumes:
+  identity_data:
+  customer_data:
+  workshop_data:
