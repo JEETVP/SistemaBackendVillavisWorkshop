@@ -30,18 +30,19 @@ from services.api_gateway.schemas import (
     VehicleAccountRegister,
     VehicleCreate,
     VehicleIntakeCreate,
-    VehicleLogin,
     VehicleUpdate,
     WorkshopCreate,
     WorkshopUpdate,
     WorkOrderCreate,
     WorkOrderStatusUpdate,
 )
+from services.common.security import verify_token
 
 IDENTITY_SERVICE_URL = os.getenv("IDENTITY_SERVICE_URL", "http://localhost:8003")
 CUSTOMERS_SERVICE_URL = os.getenv("CUSTOMERS_SERVICE_URL", "http://localhost:8001")
 WORKSHOP_SERVICE_URL = os.getenv("WORKSHOP_SERVICE_URL", "http://localhost:8002")
 REQUEST_TIMEOUT = 8.0
+PUBLIC_KEY_CACHE: str | None = None
 
 app = FastAPI(
     title="Villavis Workshop API Gateway",
@@ -90,6 +91,21 @@ def extract_token(authorization: str | None) -> str:
 
 async def current_user(authorization: str | None = Header(default=None)) -> dict:
     token = extract_token(authorization)
+    global PUBLIC_KEY_CACHE
+    if PUBLIC_KEY_CACHE is None:
+        key_data, key_code = await request_json("GET", IDENTITY_SERVICE_URL, "/auth/public-key")
+        raise_for_service_error(key_data, key_code)
+        if key_data.get("algorithm") != "RS256" or not key_data.get("public_key"):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Identity service returned an invalid signing key",
+            )
+        PUBLIC_KEY_CACHE = key_data["public_key"]
+    try:
+        claims = verify_token(token, PUBLIC_KEY_CACHE)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token") from exc
+
     data, code = await request_json(
         "POST",
         IDENTITY_SERVICE_URL,
@@ -97,6 +113,8 @@ async def current_user(authorization: str | None = Header(default=None)) -> dict
         json={"access_token": token},
     )
     raise_for_service_error(data, code)
+    if data.get("id") != claims.get("sub") or data.get("role") != claims.get("role"):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token claims do not match session")
     return data
 
 
@@ -157,21 +175,6 @@ def ensure_vehicle_vin(vehicle: dict, vin: str) -> None:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid VIN for selected vehicle",
         )
-
-
-async def create_vehicle_session(customer: dict, vehicle: dict) -> dict:
-    data, code = await request_json(
-        "POST",
-        IDENTITY_SERVICE_URL,
-        "/auth/vehicle-session",
-        json={
-            "name": customer["name"],
-            "customer_id": customer["id"],
-            "primary_vehicle_id": vehicle["id"],
-        },
-    )
-    raise_for_service_error(data, code)
-    return data
 
 
 @app.get("/health")
@@ -257,7 +260,7 @@ async def register_vehicle_account(payload: VehicleAccountRegister, response: Re
     raise_for_service_error(customer, customer_code)
 
     vehicle_payload = payload.model_dump(
-        exclude={"name", "phone"},
+        exclude={"name", "phone", "password"},
     )
     if not vehicle_payload.get("owner_name"):
         vehicle_payload["owner_name"] = payload.name
@@ -270,36 +273,43 @@ async def register_vehicle_account(payload: VehicleAccountRegister, response: Re
     )
     raise_for_service_error(vehicle, vehicle_code)
 
-    session = await create_vehicle_session(customer, vehicle)
+    session, session_code = await request_json(
+        "POST",
+        IDENTITY_SERVICE_URL,
+        "/auth/client/register",
+        json={
+            "name": payload.name,
+            "phone": payload.phone,
+            "password": payload.password,
+            "customer_id": customer["id"],
+            "primary_vehicle_id": vehicle["id"],
+        },
+    )
+    raise_for_service_error(session, session_code)
     response.status_code = status.HTTP_201_CREATED
     return {"access_token": session["access_token"], "token_type": "bearer", "user": session["user"], "vehicle": vehicle}
 
 
 @app.post("/auth/login")
-async def login_with_vehicle(payload: VehicleLogin) -> Any:
-    vehicle, vehicle_code = await request_json(
-        "GET",
-        CUSTOMERS_SERVICE_URL,
-        f"/vehicles/by-plate/{payload.plate}",
+async def login_with_phone(payload: StaffLogin) -> Any:
+    data, code = await request_json(
+        "POST",
+        IDENTITY_SERVICE_URL,
+        "/auth/login",
+        json=payload.model_dump(),
     )
-    if vehicle_code >= 400:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid plate or VIN",
+    raise_for_service_error(data, code)
+    vehicle = None
+    primary_vehicle_id = data.get("user", {}).get("primary_vehicle_id")
+    if primary_vehicle_id:
+        vehicle, vehicle_code = await request_json(
+            "GET",
+            CUSTOMERS_SERVICE_URL,
+            f"/vehicles/{primary_vehicle_id}",
         )
-
-    stored_vin = (vehicle.get("vin") or "").upper()
-    if stored_vin != payload.vin.strip().upper():
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid plate or VIN")
-
-    customer, customer_code = await request_json(
-        "GET",
-        CUSTOMERS_SERVICE_URL,
-        f"/customers/{vehicle['customer_id']}",
-    )
-    raise_for_service_error(customer, customer_code)
-    session = await create_vehicle_session(customer, vehicle)
-    return {"access_token": session["access_token"], "token_type": "bearer", "user": session["user"], "vehicle": vehicle}
+        if vehicle_code >= 400:
+            vehicle = None
+    return {**data, "vehicle": vehicle}
 
 
 @app.post("/auth/staff/login")
@@ -311,6 +321,8 @@ async def staff_login(payload: StaffLogin) -> Any:
         json=payload.model_dump(),
     )
     raise_for_service_error(data, code)
+    if data.get("user", {}).get("role") not in {"staff", "admin"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Staff account required")
     return data
 
 

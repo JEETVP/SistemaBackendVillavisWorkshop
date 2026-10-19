@@ -82,6 +82,7 @@ curl -X POST http://localhost:8000/auth/register \
   -d '{
     "name":"Carlos Ramirez",
     "phone":"555-0101",
+    "password":"CambiaEstaClave123",
     "plate":"ABC-123",
     "vin":"3N1CN7AD0KL000001",
     "brand":"Nissan",
@@ -95,14 +96,14 @@ curl -X POST http://localhost:8000/auth/register \
   }'
 ```
 
-Guarda el `access_token` de la respuesta y usalo como token Bearer. El cliente no usa correo ni contrasena; su acceso se vincula al vehiculo registrado.
+Guarda el `access_token` de la respuesta y usalo como token Bearer. El cliente inicia sesion con telefono y contrasena; el registro vincula la cuenta con el primer vehiculo.
 
-Iniciar sesion como cliente con placa y VIN:
+Iniciar sesion con telefono y contrasena:
 
 ```bash
 curl -X POST http://localhost:8000/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"plate":"ABC-123","vin":"3N1CN7AD0KL000001"}'
+  -d '{"phone":"555-0101","password":"CambiaEstaClave123"}'
 ```
 
 Consultar vehiculos vinculados al cliente:
@@ -137,10 +138,12 @@ Iniciar sesion con el administrador de desarrollo para tareas del taller:
 ```bash
 curl -X POST http://localhost:8000/auth/staff/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@villavis.test","password":"password123"}'
+  -d '{"phone":"5550000000","password":"password123"}'
 ```
 
-En Docker Compose se crea este administrador por variables de entorno solo para desarrollo; cambia esas credenciales si se usa fuera de pruebas.
+En Docker Compose se crea este administrador por variables de entorno solo para desarrollo; cambia esas credenciales si se usa fuera de pruebas. El endpoint `POST /auth/staff/login` acepta el mismo formato de telefono y contrasena y solo permite cuentas del personal.
+
+Las contrasenas se guardan con PBKDF2-HMAC-SHA256, sal aleatoria por usuario y 120,000 iteraciones. Las sesiones son JWT RS256 con expiracion de una hora: identidad firma con la clave privada persistida en el volumen `identity_data`, y el gateway obtiene la clave publica de `GET /auth/public-key` para validar firma, emisor, audiencia y expiracion. El gateway consulta despues si la sesion sigue activa para respetar el cierre de sesion.
 
 Crear taller:
 
@@ -488,11 +491,11 @@ Gateway:
 
 ## Roles
 
-- `client`: entra con placa y VIN, consulta sus vehiculos, citas, ordenes, cotizaciones, evidencias y recomendaciones vinculadas.
-- `staff`: registra clientes, vehiculos, servicios, citas, ordenes, cotizaciones, evidencias, recomendaciones y pagos/apartados.
+- `client`: entra con telefono y contrasena, consulta sus vehiculos, citas, ordenes, cotizaciones, evidencias y recomendaciones vinculadas.
+- `staff`: inicia sesion con telefono y contrasena; registra clientes, vehiculos, servicios, citas, ordenes, cotizaciones, evidencias, recomendaciones y pagos/apartados.
 - `admin`: tiene los mismos permisos operativos del personal para el piloto.
 
-El registro publico crea cuentas `client` a partir de los datos del vehiculo. La creacion de usuarios `staff` y `admin` esta protegida por token de administrador y usa `POST /auth/staff/register`.
+El registro publico crea cuentas `client` a partir de los datos del vehiculo y requiere telefono y contrasena. La creacion de usuarios `staff` y `admin` esta protegida por token de administrador y `POST /auth/staff/register` tambien solicita telefono y contrasena.
 
 ## Decision de diseno
 

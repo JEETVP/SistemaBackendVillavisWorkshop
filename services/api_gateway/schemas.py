@@ -39,7 +39,8 @@ class VehicleUpdate(BaseModel):
 
 class VehicleAccountRegister(BaseModel):
     name: str = Field(min_length=2, max_length=120)
-    phone: str = Field(min_length=5, max_length=40)
+    phone: str = Field(min_length=7, max_length=24, pattern=r"^[+0-9()\-\s]+$")
+    password: str = Field(min_length=8, max_length=128)
     plate: str = Field(min_length=3, max_length=20)
     vin: str = Field(min_length=5, max_length=17)
     brand: str = Field(min_length=2, max_length=60)
@@ -52,18 +53,15 @@ class VehicleAccountRegister(BaseModel):
     owner_name: str | None = Field(default=None, max_length=120)
 
 
-class VehicleLogin(BaseModel):
-    plate: str = Field(min_length=3, max_length=20)
-    vin: str = Field(min_length=5, max_length=17)
-
-
 class StaffLogin(BaseModel):
-    email: str = Field(max_length=120, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-    password: str
+    phone: str = Field(min_length=7, max_length=24, pattern=r"^[+0-9()\-\s]+$")
+    password: str = Field(min_length=8, max_length=128)
 
 
-class StaffUserRegister(StaffLogin):
+class StaffUserRegister(BaseModel):
     name: str = Field(min_length=2, max_length=120)
+    phone: str = Field(min_length=7, max_length=24, pattern=r"^[+0-9()\-\s]+$")
+    password: str = Field(min_length=8, max_length=128)
     role: str = Field(default="staff", pattern="^(staff|admin)$")
 
 

@@ -18,6 +18,8 @@ services:
     command: uvicorn services.identity_service.app:app --host 0.0.0.0 --port 8003
     environment:
       IDENTITY_DB_PATH: /data/identity.db
+      IDENTITY_PRIVATE_KEY_PATH: /data/jwt_private.pem
+      IDENTITY_BOOTSTRAP_ADMIN_PHONE: "5550000000"
       IDENTITY_BOOTSTRAP_ADMIN_EMAIL: admin@villavis.test
       IDENTITY_BOOTSTRAP_ADMIN_PASSWORD: password123
     expose:
