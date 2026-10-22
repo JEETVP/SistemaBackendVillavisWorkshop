@@ -19,10 +19,10 @@ class CustomerSelfRegistrationTests(ServiceFixture):
         return self.request(method, '/api' + path, ORIGIN, body, expected)
 
     def counts(self):
-        with connect(identity.DB_PATH) as db:
-            users = db.execute('SELECT COUNT(*) FROM users').fetchone()[0]
-        with connect(customers.DB_PATH) as db:
-            return users, db.execute('SELECT COUNT(*) FROM customers').fetchone()[0], db.execute('SELECT COUNT(*) FROM vehicles').fetchone()[0]
+        with connect(identity.DATABASE_URL) as db:
+            users = next(iter(db.execute('SELECT COUNT(*) FROM users').fetchone().values()))
+        with connect(customers.DATABASE_URL) as db:
+            return users, next(iter(db.execute('SELECT COUNT(*) FROM customers').fetchone().values())), next(iter(db.execute('SELECT COUNT(*) FROM vehicles').fetchone().values()))
 
     def test_register_without_workshop_vehicle_or_activation_and_login_after_logout(self):
         data = self.web('POST', '/auth/customers', self.payload, 201)
@@ -36,12 +36,12 @@ class CustomerSelfRegistrationTests(ServiceFixture):
         self.assertNotIn('access_token', data)
         token = self.client.cookies.get('tallerplus_session')
         self.assertTrue(token)
-        with connect(identity.DB_PATH) as db:
-            stored = db.execute('SELECT * FROM users WHERE id=?', (user['uid'],)).fetchone()
+        with connect(identity.DATABASE_URL) as db:
+            stored = db.execute('SELECT * FROM users WHERE id=%s', (user['uid'],)).fetchone()
             self.assertNotEqual(stored['password_hash'], self.payload['password'])
             self.assertIsNone(stored['registration_workshop_id'])
             self.assertIsNone(stored['primary_vehicle_id'])
-            self.assertEqual(db.execute('SELECT * FROM activations WHERE user_id=?', (user['uid'],)).fetchall(), [])
+            self.assertEqual(db.execute('SELECT * FROM activations WHERE user_id=%s', (user['uid'],)).fetchall(), [])
         self.assertEqual(self.web('GET', '/auth/session')['user']['uid'], user['uid'])
         self.web('POST', '/auth/logout', {})
         self.web('GET', '/auth/session', expected=401)

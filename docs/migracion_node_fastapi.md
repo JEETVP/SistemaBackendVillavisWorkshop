@@ -1,3 +1,5 @@
+> Estado actual: PostgreSQL y Render, sin importaci?n de datos. Ver [configuraci?n actual](postgresql-render.md). Las referencias a SQLite de este documento son hist?ricas.
+
 > Actualización del 20 de octubre de 2026: los módulos solicitados de taller y conductor ya tienen persistencia y sincronización en SQL. Consultar [estado de la integración web](sincronizacion_web_sql.md). Las limitaciones de fases anteriores descritas a continuación son históricas.
 
 # Migracion de Node a FastAPI: primera fase

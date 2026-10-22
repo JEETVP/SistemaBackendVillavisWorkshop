@@ -51,10 +51,10 @@ class BrowserApiTests(ServiceFixture):
 
     def counts(self):
         result = []
-        for path, table in [(identity.DB_PATH, "users"), (customers.DB_PATH, "customers"),
-                            (customers.DB_PATH, "vehicles"), (workshop.DB_PATH, "work_orders")]:
+        for path, table in [(identity.DATABASE_URL, "users"), (customers.DATABASE_URL, "customers"),
+                            (customers.DATABASE_URL, "vehicles"), (workshop.DATABASE_URL, "work_orders")]:
             with connect(path) as db:
-                result.append(db.execute(f"SELECT count(*) FROM {table}").fetchone()[0])
+                result.append(next(iter(db.execute(f"SELECT count(*) FROM {table}").fetchone().values())))
         return result
 
     def test_complete_flow_uses_canonical_data_and_cookie(self):
@@ -140,8 +140,8 @@ class BrowserApiTests(ServiceFixture):
         token = parse_qs(urlsplit(intake["activationUrl"]).query)["token"][0]
         self.web("POST", "/activation/complete", {"token": token, "password": "ClaveCliente123!", "passwordConfirm": "Diferente123!"}, 400)
         self.web("POST", "/activation/validate", {"token": token})
-        with connect(identity.DB_PATH) as db:
-            db.execute("UPDATE activations SET expires_at = ?", (time.time() - 1,))
+        with connect(identity.DATABASE_URL) as db:
+            db.execute("UPDATE activations SET expires_at = %s", (time.time() - 1,))
         self.activate(token, 400)
 
     def test_activation_is_single_use_under_concurrent_requests(self):

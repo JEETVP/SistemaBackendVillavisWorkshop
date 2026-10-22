@@ -9,5 +9,5 @@ RUN pip install --no-cache-dir -r requirements.txt \
 COPY --chown=app:app services ./services
 COPY --chown=app:app scripts ./scripts
 USER app
-EXPOSE 8000
-CMD ["uvicorn", "services.api_gateway.app:app", "--host", "0.0.0.0", "--port", "8000", "--no-proxy-headers"]
+EXPOSE 10000
+CMD ["python", "scripts/render_start.py"]

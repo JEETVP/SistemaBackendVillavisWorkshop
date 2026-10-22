@@ -97,9 +97,9 @@ class BrowserSyncTests(ServiceFixture):
         self.assertEqual(shared['autorizacion']['serviciosIds'],['general'])
         self.assertEqual(shared['autorizacion']['metodoPago'],'efectivo')
         self.assertEqual(shared['progreso']['etapa'],'Servicio')
-        with connect(workshop.DB_PATH) as db:
-            self.assertEqual(db.execute('SELECT estimated_total FROM work_orders WHERE id=?',(oid,)).fetchone()[0],1900)
-            self.assertEqual(db.execute('SELECT COUNT(*) FROM work_order_tasks WHERE work_order_id=?',(oid,)).fetchone()[0],1)
+        with connect(workshop.DATABASE_URL) as db:
+            self.assertEqual(next(iter(db.execute('SELECT estimated_total FROM work_orders WHERE id=%s',(oid,)).fetchone().values())),1900)
+            self.assertEqual(next(iter(db.execute('SELECT COUNT(*) FROM work_order_tasks WHERE work_order_id=%s',(oid,)).fetchone().values())),1)
         self.web(self.mechanic,f'/orders/{oid}/tasks',{'completed':[True],'expectedStage':'Servicio'})
         self.web(self.mechanic,f'/orders/{oid}/photos',{'stage':'Servicio','photos':[photo]})
         self.web(self.owner,f'/orders/{oid}/advance',{})
@@ -122,8 +122,8 @@ class BrowserSyncTests(ServiceFixture):
         self.web(self.owner,'/workshop/catalog/save',{'services':{}},422)
         self.web(self.owner,'/workshop/catalog/remove',{'id':'second'})
         self.assertEqual([v['id'] for v in self.web(self.driver,'/auth/session')['catalogs'][self.wid]],['general'])
-        with connect(workshop.DB_PATH) as db:
-            self.assertEqual(db.execute('SELECT active FROM service_catalog WHERE web_service_id=? AND workshop_id=?',('second',self.wid)).fetchone()[0],0)
+        with connect(workshop.DATABASE_URL) as db:
+            self.assertEqual(next(iter(db.execute('SELECT active FROM service_catalog WHERE web_service_id=%s AND workshop_id=%s',('second',self.wid)).fetchone().values())),0)
 
     def test_staff_removal_blocks_existing_sessions_and_configuration_failure_rolls_back_profiles(self):
         self.assertEqual(self.web(self.mechanic,'/auth/session')['user']['estado'],'activo')

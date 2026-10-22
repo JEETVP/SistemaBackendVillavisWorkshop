@@ -5,6 +5,7 @@ import os
 import secrets
 import time
 from pathlib import Path
+from threading import Lock
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
@@ -15,7 +16,34 @@ TOKEN_TTL_SECONDS = int(os.getenv("JWT_TTL_SECONDS", "3600"))
 PRIVATE_KEY_PATH = os.getenv("IDENTITY_PRIVATE_KEY_PATH", "data/jwt_private.pem")
 
 
+_postgres_keys: dict[str, bytes] = {}
+_postgres_keys_lock = Lock()
+
+
+def postgres_private_key() -> bytes:
+    from services.common.database import connect, write_lock
+
+    url = os.getenv("IDENTITY_DATABASE_URL", "")
+    with _postgres_keys_lock:
+        if url in _postgres_keys:
+            return _postgres_keys[url]
+        with connect(url) as db:
+            write_lock(db, "jwt-signing-key")
+            db.execute("CREATE TABLE IF NOT EXISTS signing_keys (name TEXT PRIMARY KEY, pem TEXT NOT NULL)")
+            saved = db.execute("SELECT pem FROM signing_keys WHERE name=%s", ("jwt-rs256",)).fetchone()
+            if saved:
+                pem = saved["pem"].encode("ascii")
+            else:
+                key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+                pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
+                db.execute("INSERT INTO signing_keys (name,pem) VALUES (%s,%s)", ("jwt-rs256", pem.decode("ascii")))
+        _postgres_keys[url] = pem
+        return pem
+
+
 def ensure_private_key(path: str = PRIVATE_KEY_PATH) -> bytes:
+    if os.getenv("IDENTITY_KEY_STORAGE") == "postgresql":
+        return postgres_private_key()
     key_path = Path(path)
     key_path.parent.mkdir(parents=True, exist_ok=True)
     if not key_path.exists():

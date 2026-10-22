@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import sqlite3
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query, status
 
-from services.common.database import connect, db_path_from_env
+from services.common.database import Connection, IntegrityError, table_columns, write_lock, connect, database_url_from_env
 from services.common.time import utc_now_iso
 from services.workshop_service.web import create_router, init_web_workshops
 from services.workshop_service.schemas import (
@@ -61,7 +60,7 @@ from services.workshop_service.schemas import (
     WorkOrderStatusUpdate,
 )
 
-DB_PATH = db_path_from_env("WORKSHOP_DB_PATH", "data/workshop.db")
+DATABASE_URL = database_url_from_env("WORKSHOP_DATABASE_URL")
 
 app = FastAPI(
     title="Villavis Workshop Service",
@@ -70,19 +69,19 @@ app = FastAPI(
 )
 
 
-def row_to_dict(row: sqlite3.Row | None) -> dict | None:
+def row_to_dict(row: dict | None) -> dict | None:
     return dict(row) if row else None
 
 
-def ensure_columns(db: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
-    existing = {row["name"] for row in db.execute(f"PRAGMA table_info({table})").fetchall()}
+def ensure_columns(db: Connection, table: str, columns: dict[str, str]) -> None:
+    existing = table_columns(db, table)
     for column, column_type in columns.items():
         if column not in existing:
             db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
 
 
 def init_db(db_path: str | None = None) -> None:
-    with connect(db_path or DB_PATH) as db:
+    with connect(db_path or DATABASE_URL) as db:
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS workshops (
@@ -106,13 +105,13 @@ def init_db(db_path: str | None = None) -> None:
                 service_type TEXT,
                 description TEXT,
                 priority_rank INTEGER NOT NULL DEFAULT 2,
-                price_3_cyl REAL NOT NULL DEFAULT 0,
-                price_4_cyl REAL NOT NULL DEFAULT 0,
-                price_6_cyl REAL NOT NULL DEFAULT 0,
-                price_8_cyl REAL NOT NULL DEFAULT 0,
+                price_3_cyl DOUBLE PRECISION NOT NULL DEFAULT 0,
+                price_4_cyl DOUBLE PRECISION NOT NULL DEFAULT 0,
+                price_6_cyl DOUBLE PRECISION NOT NULL DEFAULT 0,
+                price_8_cyl DOUBLE PRECISION NOT NULL DEFAULT 0,
                 parts_brand TEXT,
                 supplies_brand TEXT,
-                base_price REAL NOT NULL DEFAULT 0,
+                base_price DOUBLE PRECISION NOT NULL DEFAULT 0,
                 estimated_minutes INTEGER,
                 active INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL,
@@ -131,7 +130,7 @@ def init_db(db_path: str | None = None) -> None:
                 requested_at TEXT NOT NULL,
                 notes TEXT,
                 status TEXT NOT NULL,
-                estimated_total REAL NOT NULL DEFAULT 0,
+                estimated_total DOUBLE PRECISION NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
@@ -148,7 +147,7 @@ def init_db(db_path: str | None = None) -> None:
                 description TEXT NOT NULL,
                 priority TEXT NOT NULL,
                 status TEXT NOT NULL,
-                estimated_total REAL NOT NULL DEFAULT 0,
+                estimated_total DOUBLE PRECISION NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
@@ -161,10 +160,10 @@ def init_db(db_path: str | None = None) -> None:
                 "workshop_id": "TEXT",
                 "service_type": "TEXT",
                 "priority_rank": "INTEGER NOT NULL DEFAULT 2",
-                "price_3_cyl": "REAL NOT NULL DEFAULT 0",
-                "price_4_cyl": "REAL NOT NULL DEFAULT 0",
-                "price_6_cyl": "REAL NOT NULL DEFAULT 0",
-                "price_8_cyl": "REAL NOT NULL DEFAULT 0",
+                "price_3_cyl": "DOUBLE PRECISION NOT NULL DEFAULT 0",
+                "price_4_cyl": "DOUBLE PRECISION NOT NULL DEFAULT 0",
+                "price_6_cyl": "DOUBLE PRECISION NOT NULL DEFAULT 0",
+                "price_8_cyl": "DOUBLE PRECISION NOT NULL DEFAULT 0",
                 "parts_brand": "TEXT",
                 "supplies_brand": "TEXT",
             },
@@ -175,7 +174,7 @@ def init_db(db_path: str | None = None) -> None:
             {
                 "workshop_id": "TEXT",
                 "intake_id": "TEXT",
-                "estimated_total": "REAL NOT NULL DEFAULT 0",
+                "estimated_total": "DOUBLE PRECISION NOT NULL DEFAULT 0",
             },
         )
         ensure_columns(db, "work_orders", {"workshop_id": "TEXT"})
@@ -212,14 +211,15 @@ def init_db(db_path: str | None = None) -> None:
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS appointment_services (
+                sequence_no BIGINT GENERATED ALWAYS AS IDENTITY,
                 id TEXT PRIMARY KEY,
                 appointment_id TEXT NOT NULL,
                 service_id TEXT NOT NULL,
                 service_name TEXT NOT NULL,
                 cylinder_count INTEGER NOT NULL,
                 quantity INTEGER NOT NULL DEFAULT 1,
-                unit_price REAL NOT NULL DEFAULT 0,
-                estimated_total REAL NOT NULL DEFAULT 0,
+                unit_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+                estimated_total DOUBLE PRECISION NOT NULL DEFAULT 0,
                 FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE CASCADE,
                 FOREIGN KEY (service_id) REFERENCES service_catalog(id) ON DELETE CASCADE
             )
@@ -234,7 +234,7 @@ def init_db(db_path: str | None = None) -> None:
                 vehicle_id TEXT NOT NULL,
                 intake_id TEXT,
                 status TEXT NOT NULL DEFAULT 'open',
-                subtotal REAL NOT NULL DEFAULT 0,
+                subtotal DOUBLE PRECISION NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY (workshop_id) REFERENCES workshops(id) ON DELETE CASCADE
@@ -252,8 +252,8 @@ def init_db(db_path: str | None = None) -> None:
                 priority_rank INTEGER NOT NULL DEFAULT 2,
                 cylinder_count INTEGER NOT NULL,
                 quantity INTEGER NOT NULL DEFAULT 1,
-                unit_price REAL NOT NULL DEFAULT 0,
-                line_total REAL NOT NULL DEFAULT 0,
+                unit_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+                line_total DOUBLE PRECISION NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (cart_id) REFERENCES service_carts(id) ON DELETE CASCADE,
                 FOREIGN KEY (service_id) REFERENCES service_catalog(id) ON DELETE CASCADE
@@ -267,7 +267,7 @@ def init_db(db_path: str | None = None) -> None:
                 work_order_id TEXT NOT NULL,
                 service_id TEXT,
                 name TEXT NOT NULL,
-                price REAL NOT NULL DEFAULT 0,
+                price DOUBLE PRECISION NOT NULL DEFAULT 0,
                 priority TEXT NOT NULL DEFAULT 'normal',
                 status TEXT NOT NULL,
                 created_at TEXT NOT NULL,
@@ -283,7 +283,7 @@ def init_db(db_path: str | None = None) -> None:
                 id TEXT PRIMARY KEY,
                 work_order_id TEXT NOT NULL,
                 status TEXT NOT NULL,
-                subtotal REAL NOT NULL DEFAULT 0,
+                subtotal DOUBLE PRECISION NOT NULL DEFAULT 0,
                 notes TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
@@ -294,14 +294,15 @@ def init_db(db_path: str | None = None) -> None:
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS quote_items (
+                sequence_no BIGINT GENERATED ALWAYS AS IDENTITY,
                 id TEXT PRIMARY KEY,
                 quote_id TEXT NOT NULL,
                 service_id TEXT,
                 cylinder_count INTEGER,
                 description TEXT NOT NULL,
                 quantity INTEGER NOT NULL DEFAULT 1,
-                unit_price REAL NOT NULL DEFAULT 0,
-                total REAL NOT NULL DEFAULT 0,
+                unit_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+                total DOUBLE PRECISION NOT NULL DEFAULT 0,
                 FOREIGN KEY (quote_id) REFERENCES quotes(id) ON DELETE CASCADE
             )
             """
@@ -338,7 +339,7 @@ def init_db(db_path: str | None = None) -> None:
             CREATE TABLE IF NOT EXISTS payments (
                 id TEXT PRIMARY KEY,
                 work_order_id TEXT NOT NULL,
-                amount REAL NOT NULL,
+                amount DOUBLE PRECISION NOT NULL,
                 provider TEXT NOT NULL,
                 reference TEXT,
                 status TEXT NOT NULL,
@@ -356,9 +357,9 @@ def init_db(db_path: str | None = None) -> None:
                 customer_id TEXT NOT NULL,
                 vehicle_id TEXT NOT NULL,
                 provider TEXT NOT NULL,
-                service_total REAL NOT NULL,
+                service_total DOUBLE PRECISION NOT NULL,
                 deposit_percentage INTEGER NOT NULL,
-                deposit_amount REAL NOT NULL,
+                deposit_amount DOUBLE PRECISION NOT NULL,
                 payment_link TEXT NOT NULL,
                 status TEXT NOT NULL,
                 created_at TEXT NOT NULL,
@@ -377,9 +378,9 @@ def init_db(db_path: str | None = None) -> None:
                 payment_request_id TEXT NOT NULL,
                 customer_id TEXT NOT NULL,
                 vehicle_id TEXT NOT NULL,
-                service_total REAL NOT NULL,
+                service_total DOUBLE PRECISION NOT NULL,
                 deposit_percentage INTEGER NOT NULL,
-                deposit_amount REAL NOT NULL,
+                deposit_amount DOUBLE PRECISION NOT NULL,
                 status TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE CASCADE,
@@ -420,45 +421,45 @@ def init_db(db_path: str | None = None) -> None:
         )
 
 
-def fetch_work_order(db: sqlite3.Connection, order_id: str) -> sqlite3.Row:
-    row = db.execute("SELECT * FROM work_orders WHERE id = ?", (order_id,)).fetchone()
+def fetch_work_order(db: Connection, order_id: str) -> dict:
+    row = db.execute("SELECT * FROM work_orders WHERE id = %s", (order_id,)).fetchone()
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work order not found")
     return row
 
 
-def fetch_workshop(db: sqlite3.Connection, workshop_id: str) -> sqlite3.Row:
-    row = db.execute("SELECT * FROM workshops WHERE id = ?", (workshop_id,)).fetchone()
+def fetch_workshop(db: Connection, workshop_id: str) -> dict:
+    row = db.execute("SELECT * FROM workshops WHERE id = %s", (workshop_id,)).fetchone()
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workshop not found")
     return row
 
 
-def fetch_service(db: sqlite3.Connection, service_id: str) -> sqlite3.Row:
-    row = db.execute("SELECT * FROM service_catalog WHERE id = ?", (service_id,)).fetchone()
+def fetch_service(db: Connection, service_id: str) -> dict:
+    row = db.execute("SELECT * FROM service_catalog WHERE id = %s", (service_id,)).fetchone()
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
     return row
 
 
-def fetch_cart(db: sqlite3.Connection, cart_id: str) -> sqlite3.Row:
-    row = db.execute("SELECT * FROM service_carts WHERE id = ?", (cart_id,)).fetchone()
+def fetch_cart(db: Connection, cart_id: str) -> dict:
+    row = db.execute("SELECT * FROM service_carts WHERE id = %s", (cart_id,)).fetchone()
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service cart not found")
     return row
 
 
-def service_price_for_cylinders(service: sqlite3.Row | dict, cylinder_count: CylinderCount) -> float:
+def service_price_for_cylinders(service: dict | dict, cylinder_count: CylinderCount) -> float:
     key = f"price_{cylinder_count.value}_cyl"
     return float(service[key] or 0)
 
 
-def priority_summary_for_cart(db: sqlite3.Connection, cart_id: str) -> list[dict]:
+def priority_summary_for_cart(db: Connection, cart_id: str) -> list[dict]:
     rows = db.execute(
         """
         SELECT priority_rank, COUNT(*) AS item_count, COALESCE(SUM(line_total), 0) AS total
         FROM service_cart_items
-        WHERE cart_id = ?
+        WHERE cart_id = %s
         GROUP BY priority_rank
         ORDER BY priority_rank ASC
         """,
@@ -467,14 +468,14 @@ def priority_summary_for_cart(db: sqlite3.Connection, cart_id: str) -> list[dict
     return [dict(row) for row in rows]
 
 
-def cart_with_items(db: sqlite3.Connection, cart_id: str) -> dict:
+def cart_with_items(db: Connection, cart_id: str) -> dict:
     cart = fetch_cart(db, cart_id)
     items = db.execute(
         """
         SELECT id, cart_id, service_id, service_name, service_type, priority_rank,
                cylinder_count, quantity, unit_price, line_total
         FROM service_cart_items
-        WHERE cart_id = ?
+        WHERE cart_id = %s
         ORDER BY priority_rank ASC, created_at ASC
         """,
         (cart_id,),
@@ -485,13 +486,13 @@ def cart_with_items(db: sqlite3.Connection, cart_id: str) -> dict:
     return data
 
 
-def recalculate_cart(db: sqlite3.Connection, cart_id: str) -> None:
+def recalculate_cart(db: Connection, cart_id: str) -> None:
     subtotal = db.execute(
-        "SELECT COALESCE(SUM(line_total), 0) AS subtotal FROM service_cart_items WHERE cart_id = ?",
+        "SELECT COALESCE(SUM(line_total), 0) AS subtotal FROM service_cart_items WHERE cart_id = %s",
         (cart_id,),
     ).fetchone()["subtotal"]
     db.execute(
-        "UPDATE service_carts SET subtotal = ?, updated_at = ? WHERE id = ?",
+        "UPDATE service_carts SET subtotal = %s, updated_at = %s WHERE id = %s",
         (subtotal, utc_now_iso(), cart_id),
     )
 
@@ -517,7 +518,7 @@ def notification_row(
     }
 
 
-def insert_notification(db: sqlite3.Connection, notification: dict) -> None:
+def insert_notification(db: Connection, notification: dict) -> None:
     db.execute(
         """
         INSERT INTO app_notifications (
@@ -525,8 +526,8 @@ def insert_notification(db: sqlite3.Connection, notification: dict) -> None:
             related_entity_type, related_entity_id, read_at, created_at
         )
         VALUES (
-            :id, :customer_id, :title, :message, :notification_type,
-            :related_entity_type, :related_entity_id, :read_at, :created_at
+            %(id)s, %(customer_id)s, %(title)s, %(message)s, %(notification_type)s,
+            %(related_entity_type)s, %(related_entity_id)s, %(read_at)s, %(created_at)s
         )
         """,
         notification,
@@ -554,7 +555,7 @@ def workshop_notification_row(
     }
 
 
-def insert_workshop_notification(db: sqlite3.Connection, notification: dict) -> None:
+def insert_workshop_notification(db: Connection, notification: dict) -> None:
     db.execute(
         """
         INSERT INTO workshop_notifications (
@@ -562,8 +563,8 @@ def insert_workshop_notification(db: sqlite3.Connection, notification: dict) -> 
             related_entity_type, related_entity_id, read_at, created_at
         )
         VALUES (
-            :id, :workshop_id, :title, :message, :notification_type,
-            :related_entity_type, :related_entity_id, :read_at, :created_at
+            %(id)s, %(workshop_id)s, %(title)s, %(message)s, %(notification_type)s,
+            %(related_entity_type)s, %(related_entity_id)s, %(read_at)s, %(created_at)s
         )
         """,
         notification,
@@ -577,22 +578,22 @@ def priority_from_rank(priority_rank: int) -> str:
     )
 
 
-def work_order_with_detail(db: sqlite3.Connection, order_id: str) -> dict:
-    order = db.execute("SELECT * FROM work_orders WHERE id = ?", (order_id,)).fetchone()
+def work_order_with_detail(db: Connection, order_id: str) -> dict:
+    order = db.execute("SELECT * FROM work_orders WHERE id = %s", (order_id,)).fetchone()
     tasks = db.execute(
-        "SELECT * FROM work_order_tasks WHERE work_order_id = ? ORDER BY created_at ASC",
+        "SELECT * FROM work_order_tasks WHERE work_order_id = %s ORDER BY created_at ASC",
         (order_id,),
     ).fetchall()
     quotes = db.execute(
-        "SELECT id FROM quotes WHERE work_order_id = ? ORDER BY created_at DESC",
+        "SELECT id FROM quotes WHERE work_order_id = %s ORDER BY created_at DESC",
         (order_id,),
     ).fetchall()
     evidence = db.execute(
-        "SELECT * FROM evidence WHERE work_order_id = ? ORDER BY created_at DESC",
+        "SELECT * FROM evidence WHERE work_order_id = %s ORDER BY created_at DESC",
         (order_id,),
     ).fetchall()
     payments = db.execute(
-        "SELECT * FROM payments WHERE work_order_id = ? ORDER BY created_at DESC",
+        "SELECT * FROM payments WHERE work_order_id = %s ORDER BY created_at DESC",
         (order_id,),
     ).fetchall()
 
@@ -614,7 +615,7 @@ def work_order_with_detail(db: sqlite3.Connection, order_id: str) -> dict:
 
 
 def scoped_count(
-    db: sqlite3.Connection,
+    db: Connection,
     table: str,
     filters: list[str],
     params: list[str | int | float],
@@ -624,7 +625,7 @@ def scoped_count(
 
 
 def scoped_sum(
-    db: sqlite3.Connection,
+    db: Connection,
     table: str,
     column: str,
     filters: list[str],
@@ -646,15 +647,15 @@ def date_scoped_filters(
     filters: list[str] = []
     params: list[str] = []
     if date_from:
-        filters.append(f"{table_alias}.created_at >= ?")
+        filters.append(f"{table_alias}.created_at >= %s")
         params.append(date_from)
     if date_to:
-        filters.append(f"{table_alias}.created_at <= ?")
+        filters.append(f"{table_alias}.created_at <= %s")
         params.append(date_to)
     return filters, params
 
 
-def add_cart_item_row(db: sqlite3.Connection, cart: sqlite3.Row, payload: ServiceCartItemCreate) -> dict:
+def add_cart_item_row(db: Connection, cart: dict, payload: ServiceCartItemCreate) -> dict:
     service = fetch_service(db, payload.service_id)
     if service["workshop_id"] != cart["workshop_id"]:
         raise HTTPException(
@@ -688,8 +689,8 @@ def add_cart_item_row(db: sqlite3.Connection, cart: sqlite3.Row, payload: Servic
             cylinder_count, quantity, unit_price, line_total, created_at
         )
         VALUES (
-            :id, :cart_id, :service_id, :service_name, :service_type, :priority_rank,
-            :cylinder_count, :quantity, :unit_price, :line_total, :created_at
+            %(id)s, %(cart_id)s, %(service_id)s, %(service_name)s, %(service_type)s, %(priority_rank)s,
+            %(cylinder_count)s, %(quantity)s, %(unit_price)s, %(line_total)s, %(created_at)s
         )
         """,
         item,
@@ -698,13 +699,13 @@ def add_cart_item_row(db: sqlite3.Connection, cart: sqlite3.Row, payload: Servic
 
 
 def update_cart_item_row(
-    db: sqlite3.Connection,
-    cart: sqlite3.Row,
+    db: Connection,
+    cart: dict,
     item_id: str,
     payload: ServiceCartItemUpdate,
 ) -> dict:
     item = db.execute(
-        "SELECT * FROM service_cart_items WHERE id = ? AND cart_id = ?",
+        "SELECT * FROM service_cart_items WHERE id = %s AND cart_id = %s",
         (item_id, cart["id"]),
     ).fetchone()
     if not item:
@@ -718,19 +719,19 @@ def update_cart_item_row(
     db.execute(
         """
         UPDATE service_cart_items
-        SET cylinder_count = ?, quantity = ?, unit_price = ?, line_total = ?
-        WHERE id = ? AND cart_id = ?
+        SET cylinder_count = %s, quantity = %s, unit_price = %s, line_total = %s
+        WHERE id = %s AND cart_id = %s
         """,
         (cylinder_count.value, quantity, unit_price, line_total, item_id, cart["id"]),
     )
     updated = db.execute(
-        "SELECT * FROM service_cart_items WHERE id = ? AND cart_id = ?",
+        "SELECT * FROM service_cart_items WHERE id = %s AND cart_id = %s",
         (item_id, cart["id"]),
     ).fetchone()
     return dict(updated)
 
 
-def add_quote_item_row(db: sqlite3.Connection, quote_id: str, payload: QuoteItemCreate) -> dict:
+def add_quote_item_row(db: Connection, quote_id: str, payload: QuoteItemCreate) -> dict:
     unit_price = payload.unit_price
     if payload.service_id and payload.cylinder_count and unit_price == 0:
         service = fetch_service(db, payload.service_id)
@@ -752,8 +753,8 @@ def add_quote_item_row(db: sqlite3.Connection, quote_id: str, payload: QuoteItem
             id, quote_id, service_id, cylinder_count, description, quantity, unit_price, total
         )
         VALUES (
-            :id, :quote_id, :service_id, :cylinder_count,
-            :description, :quantity, :unit_price, :total
+            %(id)s, %(quote_id)s, %(service_id)s, %(cylinder_count)s,
+            %(description)s, %(quantity)s, %(unit_price)s, %(total)s
         )
         """,
         item,
@@ -761,24 +762,24 @@ def add_quote_item_row(db: sqlite3.Connection, quote_id: str, payload: QuoteItem
     return item
 
 
-def recalculate_quote(db: sqlite3.Connection, quote_id: str) -> None:
+def recalculate_quote(db: Connection, quote_id: str) -> None:
     subtotal = db.execute(
-        "SELECT COALESCE(SUM(total), 0) AS subtotal FROM quote_items WHERE quote_id = ?",
+        "SELECT COALESCE(SUM(total), 0) AS subtotal FROM quote_items WHERE quote_id = %s",
         (quote_id,),
     ).fetchone()["subtotal"]
     db.execute(
-        "UPDATE quotes SET subtotal = ?, updated_at = ? WHERE id = ?",
+        "UPDATE quotes SET subtotal = %s, updated_at = %s WHERE id = %s",
         (subtotal, utc_now_iso(), quote_id),
     )
 
 
-def quote_with_items(db: sqlite3.Connection, quote_id: str) -> dict:
-    quote = db.execute("SELECT * FROM quotes WHERE id = ?", (quote_id,)).fetchone()
+def quote_with_items(db: Connection, quote_id: str) -> dict:
+    quote = db.execute("SELECT * FROM quotes WHERE id = %s", (quote_id,)).fetchone()
     if not quote:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote not found")
 
     items = db.execute(
-        "SELECT * FROM quote_items WHERE quote_id = ? ORDER BY rowid ASC",
+        "SELECT * FROM quote_items WHERE quote_id = %s ORDER BY sequence_no ASC",
         (quote_id,),
     ).fetchall()
     data = dict(quote)
@@ -791,9 +792,9 @@ def ensure_quote_editable(quote: dict) -> None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Resolved quotes cannot be edited")
 
 
-def appointment_with_services(db: sqlite3.Connection, appointment_id: str) -> dict:
+def appointment_with_services(db: Connection, appointment_id: str) -> dict:
     appointment = db.execute(
-        "SELECT * FROM appointments WHERE id = ?",
+        "SELECT * FROM appointments WHERE id = %s",
         (appointment_id,),
     ).fetchone()
     if not appointment:
@@ -803,8 +804,8 @@ def appointment_with_services(db: sqlite3.Connection, appointment_id: str) -> di
         """
         SELECT *
         FROM appointment_services
-        WHERE appointment_id = ?
-        ORDER BY rowid ASC
+        WHERE appointment_id = %s
+        ORDER BY sequence_no ASC
         """,
         (appointment_id,),
     ).fetchall()
@@ -813,13 +814,13 @@ def appointment_with_services(db: sqlite3.Connection, appointment_id: str) -> di
     return data
 
 
-def intake_with_photos(db: sqlite3.Connection, intake_id: str) -> dict:
-    intake = db.execute("SELECT * FROM vehicle_intakes WHERE id = ?", (intake_id,)).fetchone()
+def intake_with_photos(db: Connection, intake_id: str) -> dict:
+    intake = db.execute("SELECT * FROM vehicle_intakes WHERE id = %s", (intake_id,)).fetchone()
     if not intake:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle intake not found")
 
     photos = db.execute(
-        "SELECT * FROM vehicle_intake_photos WHERE intake_id = ? ORDER BY created_at ASC",
+        "SELECT * FROM vehicle_intake_photos WHERE intake_id = %s ORDER BY created_at ASC",
         (intake_id,),
     ).fetchall()
     data = dict(intake)
@@ -831,12 +832,17 @@ def intake_with_photos(db: sqlite3.Connection, intake_id: str) -> dict:
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         init_web_workshops(db)
 
 
 @app.get("/health")
 def health() -> dict:
+    try:
+        with connect(DATABASE_URL) as db:
+            db.execute("SELECT 1")
+    except Exception:
+        raise HTTPException(503, "PostgreSQL is unavailable")
     return {"service": "workshop_service", "status": "ok"}
 
 
@@ -849,40 +855,40 @@ def admin_dashboard(workshop_id: str | None = None) -> dict:
         WorkOrderStatus.approved.value,
         WorkOrderStatus.in_progress.value,
     ]
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         if workshop_id:
             fetch_workshop(db, workshop_id)
 
-        appointment_filters = ["status = ?"]
+        appointment_filters = ["status = %s"]
         appointment_params: list[str | int | float] = [AppointmentStatus.requested.value]
         order_filters: list[str] = []
         order_params: list[str | int | float] = []
         notification_filters = ["read_at IS NULL"]
         notification_params: list[str | int | float] = []
-        payment_filters = ["status = ?"]
+        payment_filters = ["status = %s"]
         payment_params: list[str | int | float] = [PaymentStatus.pending.value]
 
         if workshop_id:
-            appointment_filters.append("workshop_id = ?")
+            appointment_filters.append("workshop_id = %s")
             appointment_params.append(workshop_id)
-            order_filters.append("workshop_id = ?")
+            order_filters.append("workshop_id = %s")
             order_params.append(workshop_id)
-            notification_filters.append("workshop_id = ?")
+            notification_filters.append("workshop_id = %s")
             notification_params.append(workshop_id)
             payment_filters.append(
-                "appointment_id IN (SELECT id FROM appointments WHERE workshop_id = ?)"
+                "appointment_id IN (SELECT id FROM appointments WHERE workshop_id = %s)"
             )
             payment_params.append(workshop_id)
 
-        received_order_filters = order_filters + ["status = ?"]
+        received_order_filters = order_filters + ["status = %s"]
         received_order_params = order_params + [WorkOrderStatus.received.value]
         active_order_filters = order_filters + [
-            f"status IN ({','.join('?' for _ in active_statuses)})"
+            f"status IN ({','.join('%s' for _ in active_statuses)})"
         ]
         active_order_params = order_params + active_statuses
-        ready_order_filters = order_filters + ["status = ?"]
+        ready_order_filters = order_filters + ["status = %s"]
         ready_order_params = order_params + [WorkOrderStatus.ready.value]
-        open_revenue_filters = order_filters + ["status != ?", "status != ?"]
+        open_revenue_filters = order_filters + ["status != %s", "status != %s"]
         open_revenue_params = order_params + [
             WorkOrderStatus.cancelled.value,
             WorkOrderStatus.delivered.value,
@@ -932,7 +938,7 @@ def workshop_report(
     date_from: str | None = None,
     date_to: str | None = None,
 ) -> dict:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         if workshop_id:
             fetch_workshop(db, workshop_id)
 
@@ -946,40 +952,40 @@ def workshop_report(
         paid_filters, paid_params = date_scoped_filters("payments", date_from, date_to)
 
         if workshop_id:
-            appointment_filters.append("workshop_id = ?")
+            appointment_filters.append("workshop_id = %s")
             appointment_params.append(workshop_id)
-            order_filters.append("workshop_id = ?")
+            order_filters.append("workshop_id = %s")
             order_params.append(workshop_id)
             payment_filters.append(
-                "appointment_id IN (SELECT id FROM appointments WHERE workshop_id = ?)"
+                "appointment_id IN (SELECT id FROM appointments WHERE workshop_id = %s)"
             )
             payment_params.append(workshop_id)
             paid_filters.append(
-                "work_order_id IN (SELECT id FROM work_orders WHERE workshop_id = ?)"
+                "work_order_id IN (SELECT id FROM work_orders WHERE workshop_id = %s)"
             )
             paid_params.append(workshop_id)
 
-        completed_filters = order_filters + ["status = ?"]
+        completed_filters = order_filters + ["status = %s"]
         completed_params = order_params + [WorkOrderStatus.delivered.value]
-        cancelled_filters = order_filters + ["status = ?"]
+        cancelled_filters = order_filters + ["status = %s"]
         cancelled_params = order_params + [WorkOrderStatus.cancelled.value]
-        active_filters = order_filters + ["status NOT IN (?, ?)"]
+        active_filters = order_filters + ["status NOT IN (%s, %s)"]
         active_params = order_params + [WorkOrderStatus.cancelled.value, WorkOrderStatus.delivered.value]
-        pending_deposit_filters = payment_filters + ["status = ?"]
+        pending_deposit_filters = payment_filters + ["status = %s"]
         pending_deposit_params = payment_params + [PaymentStatus.pending.value]
-        paid_amount_filters = paid_filters + ["status = ?"]
+        paid_amount_filters = paid_filters + ["status = %s"]
         paid_amount_params = paid_params + [PaymentStatus.paid.value]
 
         service_filters: list[str] = []
         service_params: list[str | int | float] = []
         if workshop_id:
-            service_filters.append("wo.workshop_id = ?")
+            service_filters.append("wo.workshop_id = %s")
             service_params.append(workshop_id)
         if date_from:
-            service_filters.append("wo.created_at >= ?")
+            service_filters.append("wo.created_at >= %s")
             service_params.append(date_from)
         if date_to:
-            service_filters.append("wo.created_at <= ?")
+            service_filters.append("wo.created_at <= %s")
             service_params.append(date_to)
         service_where = f"WHERE {' AND '.join(service_filters)}" if service_filters else ""
         top_services = db.execute(
@@ -1053,17 +1059,17 @@ def create_workshop(payload: WorkshopCreate) -> dict:
         "photo_url": payload.photo_url.strip() if payload.photo_url else None,
         "phone": payload.phone.strip() if payload.phone else None,
         "description": payload.description.strip() if payload.description else None,
-        "active": payload.active,
+        "active": int(payload.active),
         "created_at": utc_now_iso(),
     }
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         db.execute(
             """
             INSERT INTO workshops (
                 id, name, address, photo_url, phone, description, active, created_at
             )
             VALUES (
-                :id, :name, :address, :photo_url, :phone, :description, :active, :created_at
+                %(id)s, %(name)s, %(address)s, %(photo_url)s, %(phone)s, %(description)s, %(active)s, %(created_at)s
             )
             """,
             workshop,
@@ -1073,12 +1079,12 @@ def create_workshop(payload: WorkshopCreate) -> dict:
 
 @app.get("/workshops", response_model=list[WorkshopOut])
 def list_workshops(active: bool | None = True) -> list[dict]:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         if active is None:
             rows = db.execute("SELECT * FROM workshops ORDER BY name ASC").fetchall()
         else:
             rows = db.execute(
-                "SELECT * FROM workshops WHERE active = ? ORDER BY name ASC",
+                "SELECT * FROM workshops WHERE active = %s ORDER BY name ASC",
                 (1 if active else 0,),
             ).fetchall()
     return [dict(row) for row in rows]
@@ -1086,7 +1092,7 @@ def list_workshops(active: bool | None = True) -> list[dict]:
 
 @app.get("/workshops/{workshop_id}", response_model=WorkshopOut)
 def get_workshop(workshop_id: str) -> dict:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         return dict(fetch_workshop(db, workshop_id))
 
 
@@ -1097,16 +1103,16 @@ def update_workshop(workshop_id: str, payload: WorkshopUpdate) -> dict:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update")
 
     normalized = {
-        key: value.strip() if isinstance(value, str) else value
+        key: value.strip() if isinstance(value, str) else int(value) if isinstance(value, bool) else value
         for key, value in changes.items()
     }
-    assignments = ", ".join(f"{key} = ?" for key in normalized)
+    assignments = ", ".join(f"{key} = %s" for key in normalized)
     params = list(normalized.values()) + [workshop_id]
 
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         fetch_workshop(db, workshop_id)
-        db.execute(f"UPDATE workshops SET {assignments} WHERE id = ?", params)
-        updated = db.execute("SELECT * FROM workshops WHERE id = ?", (workshop_id,)).fetchone()
+        db.execute(f"UPDATE workshops SET {assignments} WHERE id = %s", params)
+        updated = db.execute("SELECT * FROM workshops WHERE id = %s", (workshop_id,)).fetchone()
     return dict(updated)
 
 
@@ -1127,10 +1133,10 @@ def create_service(payload: ServiceCreate) -> dict:
         "supplies_brand": payload.supplies_brand.strip() if payload.supplies_brand else None,
         "base_price": payload.base_price if payload.base_price is not None else payload.price_4_cyl,
         "estimated_minutes": payload.estimated_minutes,
-        "active": payload.active,
+        "active": int(payload.active),
         "created_at": utc_now_iso(),
     }
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         fetch_workshop(db, payload.workshop_id)
         db.execute(
             """
@@ -1140,9 +1146,9 @@ def create_service(payload: ServiceCreate) -> dict:
                 parts_brand, supplies_brand, base_price, estimated_minutes, active, created_at
             )
             VALUES (
-                :id, :workshop_id, :name, :service_type, :description,
-                :priority_rank, :price_3_cyl, :price_4_cyl, :price_6_cyl, :price_8_cyl,
-                :parts_brand, :supplies_brand, :base_price, :estimated_minutes, :active, :created_at
+                %(id)s, %(workshop_id)s, %(name)s, %(service_type)s, %(description)s,
+                %(priority_rank)s, %(price_3_cyl)s, %(price_4_cyl)s, %(price_6_cyl)s, %(price_8_cyl)s,
+                %(parts_brand)s, %(supplies_brand)s, %(base_price)s, %(estimated_minutes)s, %(active)s, %(created_at)s
             )
             """,
             service,
@@ -1155,14 +1161,14 @@ def list_services(active: bool | None = True, workshop_id: str | None = None) ->
     filters: list[str] = []
     params: list[str | int] = []
     if active is not None:
-        filters.append("active = ?")
+        filters.append("active = %s")
         params.append(1 if active else 0)
     if workshop_id:
-        filters.append("workshop_id = ?")
+        filters.append("workshop_id = %s")
         params.append(workshop_id)
     where = f"WHERE {' AND '.join(filters)}" if filters else ""
 
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         rows = db.execute(
             f"SELECT * FROM service_catalog {where} ORDER BY priority_rank ASC, name ASC",
             params,
@@ -1172,7 +1178,7 @@ def list_services(active: bool | None = True, workshop_id: str | None = None) ->
 
 @app.get("/services/{service_id}", response_model=ServiceOut)
 def get_service(service_id: str) -> dict:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         return dict(fetch_service(db, service_id))
 
 
@@ -1189,26 +1195,26 @@ def update_service(service_id: str, payload: ServiceUpdate) -> dict:
         normalized[key] = value
 
     if "workshop_id" in normalized:
-        with connect(DB_PATH) as db:
+        with connect(DATABASE_URL) as db:
             fetch_workshop(db, normalized["workshop_id"])
 
     if "base_price" not in normalized:
         if "price_4_cyl" in normalized:
             normalized["base_price"] = normalized["price_4_cyl"]
 
-    assignments = ", ".join(f"{key} = ?" for key in normalized)
+    assignments = ", ".join(f"{key} = %s" for key in normalized)
     params = list(normalized.values()) + [service_id]
 
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         fetch_service(db, service_id)
-        db.execute(f"UPDATE service_catalog SET {assignments} WHERE id = ?", params)
-        updated = db.execute("SELECT * FROM service_catalog WHERE id = ?", (service_id,)).fetchone()
+        db.execute(f"UPDATE service_catalog SET {assignments} WHERE id = %s", params)
+        updated = db.execute("SELECT * FROM service_catalog WHERE id = %s", (service_id,)).fetchone()
     return dict(updated)
 
 
 @app.get("/services/{service_id}/price", response_model=ServicePriceOut)
 def get_service_price(service_id: str, cylinders: CylinderCount) -> dict:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         service = fetch_service(db, service_id)
     return {
         "service_id": service["id"],
@@ -1225,7 +1231,7 @@ def get_service_price(service_id: str, cylinders: CylinderCount) -> dict:
 
 @app.get("/workshops/{workshop_id}/services", response_model=list[ServiceOut])
 def list_workshop_services(workshop_id: str, active: bool | None = True) -> list[dict]:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         fetch_workshop(db, workshop_id)
     return list_services(active=active, workshop_id=workshop_id)
 
@@ -1245,7 +1251,7 @@ def create_service_cart(payload: ServiceCartCreate) -> dict:
         "created_at": now,
         "updated_at": now,
     }
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         fetch_workshop(db, payload.workshop_id)
         if payload.intake_id:
             intake = intake_with_photos(db, payload.intake_id)
@@ -1265,8 +1271,8 @@ def create_service_cart(payload: ServiceCartCreate) -> dict:
                 status, subtotal, created_at, updated_at
             )
             VALUES (
-                :id, :workshop_id, :customer_id, :vehicle_id, :intake_id,
-                :status, :subtotal, :created_at, :updated_at
+                %(id)s, %(workshop_id)s, %(customer_id)s, %(vehicle_id)s, %(intake_id)s,
+                %(status)s, %(subtotal)s, %(created_at)s, %(updated_at)s
             )
             """,
             cart,
@@ -1276,19 +1282,19 @@ def create_service_cart(payload: ServiceCartCreate) -> dict:
 
 @app.get("/service-carts/{cart_id}", response_model=ServiceCartOut)
 def get_service_cart(cart_id: str) -> dict:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         return cart_with_items(db, cart_id)
 
 
 @app.get("/service-carts/{cart_id}/summary", response_model=ServiceCartOut)
 def get_service_cart_summary(cart_id: str) -> dict:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         return cart_with_items(db, cart_id)
 
 
 @app.post("/service-carts/{cart_id}/items", response_model=ServiceCartOut, status_code=status.HTTP_201_CREATED)
 def add_service_cart_item(cart_id: str, payload: ServiceCartItemCreate) -> dict:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         cart = fetch_cart(db, cart_id)
         if cart["status"] != "open":
             raise HTTPException(
@@ -1305,7 +1311,7 @@ def update_service_cart_item(cart_id: str, item_id: str, payload: ServiceCartIte
     changes = payload.model_dump(exclude_unset=True)
     if not changes:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update")
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         cart = fetch_cart(db, cart_id)
         if cart["status"] != "open":
             raise HTTPException(
@@ -1319,7 +1325,7 @@ def update_service_cart_item(cart_id: str, item_id: str, payload: ServiceCartIte
 
 @app.delete("/service-carts/{cart_id}/items/{item_id}", response_model=ServiceCartOut)
 def delete_service_cart_item(cart_id: str, item_id: str) -> dict:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         cart = fetch_cart(db, cart_id)
         if cart["status"] != "open":
             raise HTTPException(
@@ -1327,7 +1333,7 @@ def delete_service_cart_item(cart_id: str, item_id: str) -> dict:
                 detail="Only open carts can be modified",
             )
         result = db.execute(
-            "DELETE FROM service_cart_items WHERE cart_id = ? AND id = ?",
+            "DELETE FROM service_cart_items WHERE cart_id = %s AND id = %s",
             (cart_id, item_id),
         )
         if result.rowcount == 0:
@@ -1345,7 +1351,7 @@ def checkout_service_cart(cart_id: str, payload: ServiceCartCheckoutCreate) -> d
     ticket_id = str(uuid4())
     ticket_number = f"VW-{now[:10].replace('-', '')}-{ticket_id[:8].upper()}"
 
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         cart = fetch_cart(db, cart_id)
         if cart["status"] != "open":
             raise HTTPException(
@@ -1353,7 +1359,7 @@ def checkout_service_cart(cart_id: str, payload: ServiceCartCheckoutCreate) -> d
                 detail="Only open carts can be checked out",
             )
         items = db.execute(
-            "SELECT * FROM service_cart_items WHERE cart_id = ? ORDER BY priority_rank ASC, created_at ASC",
+            "SELECT * FROM service_cart_items WHERE cart_id = %s ORDER BY priority_rank ASC, created_at ASC",
             (cart_id,),
         ).fetchall()
         if not items:
@@ -1386,8 +1392,8 @@ def checkout_service_cart(cart_id: str, payload: ServiceCartCheckoutCreate) -> d
                 notes, status, estimated_total, created_at, updated_at
             )
             VALUES (
-                :id, :workshop_id, :customer_id, :vehicle_id, :intake_id, :requested_at,
-                :notes, :status, :estimated_total, :created_at, :updated_at
+                %(id)s, %(workshop_id)s, %(customer_id)s, %(vehicle_id)s, %(intake_id)s, %(requested_at)s,
+                %(notes)s, %(status)s, %(estimated_total)s, %(created_at)s, %(updated_at)s
             )
             """,
             appointment,
@@ -1399,7 +1405,7 @@ def checkout_service_cart(cart_id: str, payload: ServiceCartCheckoutCreate) -> d
                     id, appointment_id, service_id, service_name, cylinder_count,
                     quantity, unit_price, estimated_total
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     str(uuid4()),
@@ -1434,8 +1440,8 @@ def checkout_service_cart(cart_id: str, payload: ServiceCartCheckoutCreate) -> d
                 description, priority, status, estimated_total, created_at, updated_at
             )
             VALUES (
-                :id, :workshop_id, :customer_id, :vehicle_id, :appointment_id,
-                :description, :priority, :status, :estimated_total, :created_at, :updated_at
+                %(id)s, %(workshop_id)s, %(customer_id)s, %(vehicle_id)s, %(appointment_id)s,
+                %(description)s, %(priority)s, %(status)s, %(estimated_total)s, %(created_at)s, %(updated_at)s
             )
             """,
             work_order,
@@ -1459,8 +1465,8 @@ def checkout_service_cart(cart_id: str, payload: ServiceCartCheckoutCreate) -> d
                     status, created_at, updated_at
                 )
                 VALUES (
-                    :id, :work_order_id, :service_id, :name, :price, :priority,
-                    :status, :created_at, :updated_at
+                    %(id)s, %(work_order_id)s, %(service_id)s, %(name)s, %(price)s, %(priority)s,
+                    %(status)s, %(created_at)s, %(updated_at)s
                 )
                 """,
                 task,
@@ -1489,9 +1495,9 @@ def checkout_service_cart(cart_id: str, payload: ServiceCartCheckoutCreate) -> d
                 status, created_at, updated_at
             )
             VALUES (
-                :id, :appointment_id, :cart_id, :customer_id, :vehicle_id, :provider,
-                :service_total, :deposit_percentage, :deposit_amount, :payment_link,
-                :status, :created_at, :updated_at
+                %(id)s, %(appointment_id)s, %(cart_id)s, %(customer_id)s, %(vehicle_id)s, %(provider)s,
+                %(service_total)s, %(deposit_percentage)s, %(deposit_amount)s, %(payment_link)s,
+                %(status)s, %(created_at)s, %(updated_at)s
             )
             """,
             payment_request,
@@ -1517,8 +1523,8 @@ def checkout_service_cart(cart_id: str, payload: ServiceCartCheckoutCreate) -> d
                 vehicle_id, service_total, deposit_percentage, deposit_amount, status, created_at
             )
             VALUES (
-                :id, :ticket_number, :appointment_id, :payment_request_id, :customer_id,
-                :vehicle_id, :service_total, :deposit_percentage, :deposit_amount, :status, :created_at
+                %(id)s, %(ticket_number)s, %(appointment_id)s, %(payment_request_id)s, %(customer_id)s,
+                %(vehicle_id)s, %(service_total)s, %(deposit_percentage)s, %(deposit_amount)s, %(status)s, %(created_at)s
             )
             """,
             ticket,
@@ -1548,7 +1554,7 @@ def checkout_service_cart(cart_id: str, payload: ServiceCartCheckoutCreate) -> d
             ),
         )
         db.execute(
-            "UPDATE service_carts SET status = ?, updated_at = ? WHERE id = ?",
+            "UPDATE service_carts SET status = %s, updated_at = %s WHERE id = %s",
             ("checked_out", now, cart_id),
         )
 
@@ -1570,16 +1576,16 @@ def create_vehicle_intake(payload: VehicleIntakeCreate) -> dict:
         "workshop_id": payload.workshop_id,
         "customer_id": payload.customer_id,
         "vehicle_id": payload.vehicle_id,
-        "has_tapones": payload.has_tapones,
-        "has_virlos": payload.has_virlos,
-        "has_tapa_gasolina": payload.has_tapa_gasolina,
-        "has_rines": payload.has_rines,
-        "has_ceniceros": payload.has_ceniceros,
-        "has_llanta_refaccion": payload.has_llanta_refaccion,
+        "has_tapones": int(payload.has_tapones),
+        "has_virlos": int(payload.has_virlos),
+        "has_tapa_gasolina": int(payload.has_tapa_gasolina),
+        "has_rines": int(payload.has_rines),
+        "has_ceniceros": int(payload.has_ceniceros),
+        "has_llanta_refaccion": int(payload.has_llanta_refaccion),
         "detail_notes": payload.detail_notes.strip() if payload.detail_notes else None,
         "created_at": utc_now_iso(),
     }
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         fetch_workshop(db, payload.workshop_id)
         db.execute(
             """
@@ -1590,10 +1596,10 @@ def create_vehicle_intake(payload: VehicleIntakeCreate) -> dict:
                 detail_notes, created_at
             )
             VALUES (
-                :id, :workshop_id, :customer_id, :vehicle_id,
-                :has_tapones, :has_virlos, :has_tapa_gasolina,
-                :has_rines, :has_ceniceros, :has_llanta_refaccion,
-                :detail_notes, :created_at
+                %(id)s, %(workshop_id)s, %(customer_id)s, %(vehicle_id)s,
+                %(has_tapones)s, %(has_virlos)s, %(has_tapa_gasolina)s,
+                %(has_rines)s, %(has_ceniceros)s, %(has_llanta_refaccion)s,
+                %(detail_notes)s, %(created_at)s
             )
             """,
             intake,
@@ -1602,7 +1608,7 @@ def create_vehicle_intake(payload: VehicleIntakeCreate) -> dict:
             db.execute(
                 """
                 INSERT INTO vehicle_intake_photos (id, intake_id, photo_url, created_at)
-                VALUES (?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s)
                 """,
                 (str(uuid4()), intake_id, photo_url.strip(), utc_now_iso()),
             )
@@ -1611,15 +1617,15 @@ def create_vehicle_intake(payload: VehicleIntakeCreate) -> dict:
 
 @app.get("/vehicle-intakes/{intake_id}", response_model=VehicleIntakeOut)
 def get_vehicle_intake(intake_id: str) -> dict:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         return intake_with_photos(db, intake_id)
 
 
 @app.get("/vehicles/{vehicle_id}/intakes", response_model=list[VehicleIntakeOut])
 def list_vehicle_intakes(vehicle_id: str) -> list[dict]:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         rows = db.execute(
-            "SELECT id FROM vehicle_intakes WHERE vehicle_id = ? ORDER BY created_at DESC",
+            "SELECT id FROM vehicle_intakes WHERE vehicle_id = %s ORDER BY created_at DESC",
             (vehicle_id,),
         ).fetchall()
         return [intake_with_photos(db, row["id"]) for row in rows]
@@ -1627,34 +1633,34 @@ def list_vehicle_intakes(vehicle_id: str) -> list[dict]:
 
 @app.get("/vehicles/{vehicle_id}/history")
 def get_vehicle_history(vehicle_id: str) -> dict:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         intakes = db.execute(
-            "SELECT id FROM vehicle_intakes WHERE vehicle_id = ? ORDER BY created_at DESC",
+            "SELECT id FROM vehicle_intakes WHERE vehicle_id = %s ORDER BY created_at DESC",
             (vehicle_id,),
         ).fetchall()
         appointments = db.execute(
-            "SELECT id FROM appointments WHERE vehicle_id = ? ORDER BY requested_at DESC",
+            "SELECT id FROM appointments WHERE vehicle_id = %s ORDER BY requested_at DESC",
             (vehicle_id,),
         ).fetchall()
         orders = db.execute(
-            "SELECT id FROM work_orders WHERE vehicle_id = ? ORDER BY created_at DESC",
+            "SELECT id FROM work_orders WHERE vehicle_id = %s ORDER BY created_at DESC",
             (vehicle_id,),
         ).fetchall()
         recommendations = db.execute(
-            "SELECT * FROM recommendations WHERE vehicle_id = ? ORDER BY created_at DESC",
+            "SELECT * FROM recommendations WHERE vehicle_id = %s ORDER BY created_at DESC",
             (vehicle_id,),
         ).fetchall()
         payment_requests = db.execute(
             """
             SELECT *
             FROM appointment_payment_requests
-            WHERE vehicle_id = ?
+            WHERE vehicle_id = %s
             ORDER BY created_at DESC
             """,
             (vehicle_id,),
         ).fetchall()
         tickets = db.execute(
-            "SELECT * FROM purchase_tickets WHERE vehicle_id = ? ORDER BY created_at DESC",
+            "SELECT * FROM purchase_tickets WHERE vehicle_id = %s ORDER BY created_at DESC",
             (vehicle_id,),
         ).fetchall()
 
@@ -1686,7 +1692,7 @@ def create_appointment(payload: AppointmentCreate) -> dict:
         "created_at": now,
         "updated_at": now,
     }
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         fetch_workshop(db, payload.workshop_id)
         if payload.intake_id:
             intake = intake_with_photos(db, payload.intake_id)
@@ -1732,8 +1738,8 @@ def create_appointment(payload: AppointmentCreate) -> dict:
                 notes, status, estimated_total, created_at, updated_at
             )
             VALUES (
-                :id, :workshop_id, :customer_id, :vehicle_id, :intake_id, :requested_at,
-                :notes, :status, :estimated_total, :created_at, :updated_at
+                %(id)s, %(workshop_id)s, %(customer_id)s, %(vehicle_id)s, %(intake_id)s, %(requested_at)s,
+                %(notes)s, %(status)s, %(estimated_total)s, %(created_at)s, %(updated_at)s
             )
             """,
             appointment,
@@ -1746,8 +1752,8 @@ def create_appointment(payload: AppointmentCreate) -> dict:
                     quantity, unit_price, estimated_total
                 )
                 VALUES (
-                    :id, :appointment_id, :service_id, :service_name, :cylinder_count,
-                    :quantity, :unit_price, :estimated_total
+                    %(id)s, %(appointment_id)s, %(service_id)s, %(service_name)s, %(cylinder_count)s,
+                    %(quantity)s, %(unit_price)s, %(estimated_total)s
                 )
                 """,
                 requested,
@@ -1764,17 +1770,17 @@ def list_appointments(
     filters: list[str] = []
     params: list[str] = []
     if workshop_id:
-        filters.append("workshop_id = ?")
+        filters.append("workshop_id = %s")
         params.append(workshop_id)
     if customer_id:
-        filters.append("customer_id = ?")
+        filters.append("customer_id = %s")
         params.append(customer_id)
     if vehicle_id:
-        filters.append("vehicle_id = ?")
+        filters.append("vehicle_id = %s")
         params.append(vehicle_id)
     where = f"WHERE {' AND '.join(filters)}" if filters else ""
 
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         rows = db.execute(
             f"SELECT * FROM appointments {where} ORDER BY requested_at ASC",
             params,
@@ -1784,21 +1790,21 @@ def list_appointments(
 
 @app.get("/appointments/{appointment_id}", response_model=AppointmentDetail)
 def get_appointment(appointment_id: str) -> dict:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         return appointment_with_services(db, appointment_id)
 
 
 @app.patch("/appointments/{appointment_id}/status", response_model=AppointmentOut)
 def update_appointment_status(appointment_id: str, payload: AppointmentStatusUpdate) -> dict:
-    with connect(DB_PATH) as db:
-        current = db.execute("SELECT id FROM appointments WHERE id = ?", (appointment_id,)).fetchone()
+    with connect(DATABASE_URL) as db:
+        current = db.execute("SELECT id FROM appointments WHERE id = %s", (appointment_id,)).fetchone()
         if not current:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Appointment not found")
         db.execute(
-            "UPDATE appointments SET status = ?, updated_at = ? WHERE id = ?",
+            "UPDATE appointments SET status = %s, updated_at = %s WHERE id = %s",
             (payload.status.value, utc_now_iso(), appointment_id),
         )
-        updated = db.execute("SELECT * FROM appointments WHERE id = ?", (appointment_id,)).fetchone()
+        updated = db.execute("SELECT * FROM appointments WHERE id = %s", (appointment_id,)).fetchone()
     return dict(updated)
 
 
@@ -1819,7 +1825,7 @@ def create_work_order(payload: WorkOrderCreate) -> dict:
         "updated_at": now,
     }
 
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         fetch_workshop(db, payload.workshop_id)
         db.execute(
             """
@@ -1828,8 +1834,8 @@ def create_work_order(payload: WorkOrderCreate) -> dict:
                 description, priority, status, estimated_total, created_at, updated_at
             )
             VALUES (
-                :id, :workshop_id, :customer_id, :vehicle_id, :appointment_id,
-                :description, :priority, :status, :estimated_total, :created_at, :updated_at
+                %(id)s, %(workshop_id)s, %(customer_id)s, %(vehicle_id)s, %(appointment_id)s,
+                %(description)s, %(priority)s, %(status)s, %(estimated_total)s, %(created_at)s, %(updated_at)s
             )
             """,
             work_order,
@@ -1860,21 +1866,21 @@ def list_work_orders(
     params: list[str] = []
 
     if status_filter:
-        filters.append("status = ?")
+        filters.append("status = %s")
         params.append(status_filter.value)
     if workshop_id:
-        filters.append("workshop_id = ?")
+        filters.append("workshop_id = %s")
         params.append(workshop_id)
     if customer_id:
-        filters.append("customer_id = ?")
+        filters.append("customer_id = %s")
         params.append(customer_id)
     if vehicle_id:
-        filters.append("vehicle_id = ?")
+        filters.append("vehicle_id = %s")
         params.append(vehicle_id)
 
     where = f"WHERE {' AND '.join(filters)}" if filters else ""
 
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         rows = db.execute(
             f"SELECT * FROM work_orders {where} ORDER BY created_at DESC",
             params,
@@ -1885,17 +1891,17 @@ def list_work_orders(
 
 @app.get("/work-orders/{order_id}", response_model=WorkOrderDetail)
 def get_work_order(order_id: str) -> dict:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         return work_order_with_detail(db, order_id)
 
 
 @app.patch("/work-orders/{order_id}/status", response_model=WorkOrderOut)
 def update_work_order_status(order_id: str, payload: WorkOrderStatusUpdate) -> dict:
     now = utc_now_iso()
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         current = fetch_work_order(db, order_id)
         db.execute(
-            "UPDATE work_orders SET status = ?, updated_at = ? WHERE id = ?",
+            "UPDATE work_orders SET status = %s, updated_at = %s WHERE id = %s",
             (payload.status.value, now, order_id),
         )
         insert_notification(
@@ -1909,7 +1915,7 @@ def update_work_order_status(order_id: str, payload: WorkOrderStatusUpdate) -> d
                 order_id,
             ),
         )
-        updated = db.execute("SELECT * FROM work_orders WHERE id = ?", (order_id,)).fetchone()
+        updated = db.execute("SELECT * FROM work_orders WHERE id = %s", (order_id,)).fetchone()
 
     return dict(updated)
 
@@ -1917,7 +1923,7 @@ def update_work_order_status(order_id: str, payload: WorkOrderStatusUpdate) -> d
 @app.post("/work-orders/{order_id}/accept", response_model=WorkOrderDetail)
 def accept_work_order(order_id: str) -> dict:
     now = utc_now_iso()
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         current = fetch_work_order(db, order_id)
         if current["status"] == WorkOrderStatus.cancelled.value:
             raise HTTPException(
@@ -1925,12 +1931,12 @@ def accept_work_order(order_id: str) -> dict:
                 detail="Cancelled work orders cannot be accepted",
             )
         db.execute(
-            "UPDATE work_orders SET status = ?, updated_at = ? WHERE id = ?",
+            "UPDATE work_orders SET status = %s, updated_at = %s WHERE id = %s",
             (WorkOrderStatus.approved.value, now, order_id),
         )
         if current["appointment_id"]:
             db.execute(
-                "UPDATE appointments SET status = ?, updated_at = ? WHERE id = ?",
+                "UPDATE appointments SET status = %s, updated_at = %s WHERE id = %s",
                 (AppointmentStatus.confirmed.value, now, current["appointment_id"]),
             )
         insert_notification(
@@ -1962,7 +1968,7 @@ def add_task(order_id: str, payload: TaskCreate) -> dict:
         "updated_at": now,
     }
 
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         fetch_work_order(db, order_id)
         db.execute(
             """
@@ -1970,17 +1976,17 @@ def add_task(order_id: str, payload: TaskCreate) -> dict:
                 id, work_order_id, service_id, name, price, priority, status, created_at, updated_at
             )
             VALUES (
-                :id, :work_order_id, :service_id, :name, :price, :priority, :status, :created_at, :updated_at
+                %(id)s, %(work_order_id)s, %(service_id)s, %(name)s, %(price)s, %(priority)s, %(status)s, %(created_at)s, %(updated_at)s
             )
             """,
             task,
         )
         total = db.execute(
-            "SELECT COALESCE(SUM(price), 0) AS total FROM work_order_tasks WHERE work_order_id = ?",
+            "SELECT COALESCE(SUM(price), 0) AS total FROM work_order_tasks WHERE work_order_id = %s",
             (order_id,),
         ).fetchone()["total"]
         db.execute(
-            "UPDATE work_orders SET estimated_total = ?, updated_at = ? WHERE id = ?",
+            "UPDATE work_orders SET estimated_total = %s, updated_at = %s WHERE id = %s",
             (total, now, order_id),
         )
 
@@ -1990,22 +1996,22 @@ def add_task(order_id: str, payload: TaskCreate) -> dict:
 @app.patch("/work-orders/{order_id}/tasks/{task_id}/status", response_model=WorkOrderDetail)
 def update_task_status(order_id: str, task_id: str, payload: TaskStatusUpdate) -> dict:
     now = utc_now_iso()
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         work_order = fetch_work_order(db, order_id)
         task = db.execute(
-            "SELECT * FROM work_order_tasks WHERE id = ? AND work_order_id = ?",
+            "SELECT * FROM work_order_tasks WHERE id = %s AND work_order_id = %s",
             (task_id, order_id),
         ).fetchone()
         if not task:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
 
         db.execute(
-            "UPDATE work_order_tasks SET status = ?, updated_at = ? WHERE id = ?",
+            "UPDATE work_order_tasks SET status = %s, updated_at = %s WHERE id = %s",
             (payload.status.value, now, task_id),
         )
 
         statuses = db.execute(
-            "SELECT status FROM work_order_tasks WHERE work_order_id = ?",
+            "SELECT status FROM work_order_tasks WHERE work_order_id = %s",
             (order_id,),
         ).fetchall()
         next_order_status = work_order["status"]
@@ -2016,11 +2022,11 @@ def update_task_status(order_id: str, task_id: str, payload: TaskStatusUpdate) -
 
         if next_order_status != work_order["status"]:
             db.execute(
-                "UPDATE work_orders SET status = ?, updated_at = ? WHERE id = ?",
+                "UPDATE work_orders SET status = %s, updated_at = %s WHERE id = %s",
                 (next_order_status, now, order_id),
             )
         else:
-            db.execute("UPDATE work_orders SET updated_at = ? WHERE id = ?", (now, order_id))
+            db.execute("UPDATE work_orders SET updated_at = %s WHERE id = %s", (now, order_id))
 
         insert_notification(
             db,
@@ -2050,12 +2056,12 @@ def create_quote(payload: QuoteCreate) -> dict:
         "updated_at": now,
     }
 
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         fetch_work_order(db, payload.work_order_id)
         db.execute(
             """
             INSERT INTO quotes (id, work_order_id, status, subtotal, notes, created_at, updated_at)
-            VALUES (:id, :work_order_id, :status, :subtotal, :notes, :created_at, :updated_at)
+            VALUES (%(id)s, %(work_order_id)s, %(status)s, %(subtotal)s, %(notes)s, %(created_at)s, %(updated_at)s)
             """,
             quote,
         )
@@ -2067,13 +2073,13 @@ def create_quote(payload: QuoteCreate) -> dict:
 
 @app.get("/quotes/{quote_id}", response_model=QuoteOut)
 def get_quote(quote_id: str) -> dict:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         return quote_with_items(db, quote_id)
 
 
 @app.post("/quotes/{quote_id}/items", response_model=QuoteOut, status_code=status.HTTP_201_CREATED)
 def add_quote_item(quote_id: str, payload: QuoteItemCreate) -> dict:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         ensure_quote_editable(quote_with_items(db, quote_id))
         add_quote_item_row(db, quote_id, payload)
         recalculate_quote(db, quote_id)
@@ -2085,16 +2091,16 @@ def update_quote_item(quote_id: str, item_id: str, payload: QuoteItemUpdate) -> 
     changes = payload.model_dump(exclude_unset=True)
     if not changes:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update")
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         ensure_quote_editable(quote_with_items(db, quote_id))
-        item = db.execute("SELECT * FROM quote_items WHERE id = ? AND quote_id = ?", (item_id, quote_id)).fetchone()
+        item = db.execute("SELECT * FROM quote_items WHERE id = %s AND quote_id = %s", (item_id, quote_id)).fetchone()
         if not item:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote item not found")
         updated = {**dict(item), **changes}
         updated["total"] = updated["quantity"] * updated["unit_price"]
         db.execute(
-            """UPDATE quote_items SET description = :description, quantity = :quantity,
-               unit_price = :unit_price, total = :total WHERE id = :id AND quote_id = :quote_id""",
+            """UPDATE quote_items SET description = %(description)s, quantity = %(quantity)s,
+               unit_price = %(unit_price)s, total = %(total)s WHERE id = %(id)s AND quote_id = %(quote_id)s""",
             updated,
         )
         recalculate_quote(db, quote_id)
@@ -2103,9 +2109,9 @@ def update_quote_item(quote_id: str, item_id: str, payload: QuoteItemUpdate) -> 
 
 @app.delete("/quotes/{quote_id}/items/{item_id}", response_model=QuoteOut)
 def delete_quote_item(quote_id: str, item_id: str) -> dict:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         ensure_quote_editable(quote_with_items(db, quote_id))
-        deleted = db.execute("DELETE FROM quote_items WHERE id = ? AND quote_id = ?", (item_id, quote_id))
+        deleted = db.execute("DELETE FROM quote_items WHERE id = %s AND quote_id = %s", (item_id, quote_id))
         if deleted.rowcount == 0:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote item not found")
         recalculate_quote(db, quote_id)
@@ -2115,18 +2121,18 @@ def delete_quote_item(quote_id: str, item_id: str) -> dict:
 @app.patch("/quotes/{quote_id}/status", response_model=QuoteOut)
 def update_quote_status(quote_id: str, payload: QuoteStatusUpdate) -> dict:
     now = utc_now_iso()
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         quote = quote_with_items(db, quote_id)
         if quote["status"] == payload.status.value:
             return quote
         ensure_quote_editable(quote)
         db.execute(
-            "UPDATE quotes SET status = ?, updated_at = ? WHERE id = ?",
+            "UPDATE quotes SET status = %s, updated_at = %s WHERE id = %s",
             (payload.status.value, now, quote_id),
         )
         if payload.status == QuoteStatus.accepted:
             db.execute(
-                "UPDATE work_orders SET status = ?, estimated_total = ?, updated_at = ? WHERE id = ?",
+                "UPDATE work_orders SET status = %s, estimated_total = %s, updated_at = %s WHERE id = %s",
                 (WorkOrderStatus.approved.value, quote["subtotal"], now, quote["work_order_id"]),
             )
         return quote_with_items(db, quote_id)
@@ -2141,12 +2147,12 @@ def add_evidence(order_id: str, payload: EvidenceCreate) -> dict:
         "caption": payload.caption.strip() if payload.caption else None,
         "created_at": utc_now_iso(),
     }
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         fetch_work_order(db, order_id)
         db.execute(
             """
             INSERT INTO evidence (id, work_order_id, file_url, caption, created_at)
-            VALUES (:id, :work_order_id, :file_url, :caption, :created_at)
+            VALUES (%(id)s, %(work_order_id)s, %(file_url)s, %(caption)s, %(created_at)s)
             """,
             evidence,
         )
@@ -2155,10 +2161,10 @@ def add_evidence(order_id: str, payload: EvidenceCreate) -> dict:
 
 @app.get("/work-orders/{order_id}/evidence", response_model=list[EvidenceOut])
 def list_evidence(order_id: str) -> list[dict]:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         fetch_work_order(db, order_id)
         rows = db.execute(
-            "SELECT * FROM evidence WHERE work_order_id = ? ORDER BY created_at DESC",
+            "SELECT * FROM evidence WHERE work_order_id = %s ORDER BY created_at DESC",
             (order_id,),
         ).fetchall()
     return [dict(row) for row in rows]
@@ -2176,14 +2182,14 @@ def create_recommendation(payload: RecommendationCreate) -> dict:
         "status": "open",
         "created_at": utc_now_iso(),
     }
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         db.execute(
             """
             INSERT INTO recommendations (
                 id, vehicle_id, title, notes, priority, due_date, status, created_at
             )
             VALUES (
-                :id, :vehicle_id, :title, :notes, :priority, :due_date, :status, :created_at
+                %(id)s, %(vehicle_id)s, %(title)s, %(notes)s, %(priority)s, %(due_date)s, %(status)s, %(created_at)s
             )
             """,
             recommendation,
@@ -2193,9 +2199,9 @@ def create_recommendation(payload: RecommendationCreate) -> dict:
 
 @app.get("/vehicles/{vehicle_id}/recommendations", response_model=list[RecommendationOut])
 def list_vehicle_recommendations(vehicle_id: str) -> list[dict]:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         rows = db.execute(
-            "SELECT * FROM recommendations WHERE vehicle_id = ? ORDER BY created_at DESC",
+            "SELECT * FROM recommendations WHERE vehicle_id = %s ORDER BY created_at DESC",
             (vehicle_id,),
         ).fetchall()
     return [dict(row) for row in rows]
@@ -2203,12 +2209,12 @@ def list_vehicle_recommendations(vehicle_id: str) -> list[dict]:
 
 @app.get("/customers/{customer_id}/notifications", response_model=list[AppNotificationOut])
 def list_customer_notifications(customer_id: str, unread_only: bool = False) -> list[dict]:
-    filters = ["customer_id = ?"]
+    filters = ["customer_id = %s"]
     params: list[str] = [customer_id]
     if unread_only:
         filters.append("read_at IS NULL")
     where = " AND ".join(filters)
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         rows = db.execute(
             f"SELECT * FROM app_notifications WHERE {where} ORDER BY created_at DESC",
             params,
@@ -2218,12 +2224,12 @@ def list_customer_notifications(customer_id: str, unread_only: bool = False) -> 
 
 @app.get("/customers/{customer_id}/notifications/unread-count", response_model=NotificationCountOut)
 def customer_notification_unread_count(customer_id: str) -> dict:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         unread_count = db.execute(
             """
             SELECT COUNT(*) AS unread_count
             FROM app_notifications
-            WHERE customer_id = ? AND read_at IS NULL
+            WHERE customer_id = %s AND read_at IS NULL
             """,
             (customer_id,),
         ).fetchone()["unread_count"]
@@ -2233,16 +2239,16 @@ def customer_notification_unread_count(customer_id: str) -> dict:
 @app.patch("/customers/{customer_id}/notifications/read-all", response_model=NotificationBulkUpdateOut)
 def mark_customer_notifications_read(customer_id: str) -> dict:
     now = utc_now_iso()
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         result = db.execute(
-            "UPDATE app_notifications SET read_at = ? WHERE customer_id = ? AND read_at IS NULL",
+            "UPDATE app_notifications SET read_at = %s WHERE customer_id = %s AND read_at IS NULL",
             (now, customer_id),
         )
         unread_count = db.execute(
             """
             SELECT COUNT(*) AS unread_count
             FROM app_notifications
-            WHERE customer_id = ? AND read_at IS NULL
+            WHERE customer_id = %s AND read_at IS NULL
             """,
             (customer_id,),
         ).fetchone()["unread_count"]
@@ -2251,9 +2257,9 @@ def mark_customer_notifications_read(customer_id: str) -> dict:
 
 @app.get("/notifications/{notification_id}", response_model=AppNotificationOut)
 def get_notification(notification_id: str) -> dict:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         notification = db.execute(
-            "SELECT * FROM app_notifications WHERE id = ?",
+            "SELECT * FROM app_notifications WHERE id = %s",
             (notification_id,),
         ).fetchone()
     if not notification:
@@ -2263,12 +2269,12 @@ def get_notification(notification_id: str) -> dict:
 
 @app.get("/workshops/{workshop_id}/notifications", response_model=list[WorkshopNotificationOut])
 def list_workshop_notifications(workshop_id: str, unread_only: bool = False) -> list[dict]:
-    filters = ["workshop_id = ?"]
+    filters = ["workshop_id = %s"]
     params: list[str] = [workshop_id]
     if unread_only:
         filters.append("read_at IS NULL")
     where = " AND ".join(filters)
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         fetch_workshop(db, workshop_id)
         rows = db.execute(
             f"SELECT * FROM workshop_notifications WHERE {where} ORDER BY created_at DESC",
@@ -2279,13 +2285,13 @@ def list_workshop_notifications(workshop_id: str, unread_only: bool = False) -> 
 
 @app.get("/workshops/{workshop_id}/notifications/unread-count", response_model=NotificationCountOut)
 def workshop_notification_unread_count(workshop_id: str) -> dict:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         fetch_workshop(db, workshop_id)
         unread_count = db.execute(
             """
             SELECT COUNT(*) AS unread_count
             FROM workshop_notifications
-            WHERE workshop_id = ? AND read_at IS NULL
+            WHERE workshop_id = %s AND read_at IS NULL
             """,
             (workshop_id,),
         ).fetchone()["unread_count"]
@@ -2295,17 +2301,17 @@ def workshop_notification_unread_count(workshop_id: str) -> dict:
 @app.patch("/workshops/{workshop_id}/notifications/read-all", response_model=NotificationBulkUpdateOut)
 def mark_workshop_notifications_read(workshop_id: str) -> dict:
     now = utc_now_iso()
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         fetch_workshop(db, workshop_id)
         result = db.execute(
-            "UPDATE workshop_notifications SET read_at = ? WHERE workshop_id = ? AND read_at IS NULL",
+            "UPDATE workshop_notifications SET read_at = %s WHERE workshop_id = %s AND read_at IS NULL",
             (now, workshop_id),
         )
         unread_count = db.execute(
             """
             SELECT COUNT(*) AS unread_count
             FROM workshop_notifications
-            WHERE workshop_id = ? AND read_at IS NULL
+            WHERE workshop_id = %s AND read_at IS NULL
             """,
             (workshop_id,),
         ).fetchone()["unread_count"]
@@ -2314,9 +2320,9 @@ def mark_workshop_notifications_read(workshop_id: str) -> dict:
 
 @app.get("/workshop-notifications/{notification_id}", response_model=WorkshopNotificationOut)
 def get_workshop_notification(notification_id: str) -> dict:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         notification = db.execute(
-            "SELECT * FROM workshop_notifications WHERE id = ?",
+            "SELECT * FROM workshop_notifications WHERE id = %s",
             (notification_id,),
         ).fetchone()
     if not notification:
@@ -2326,19 +2332,19 @@ def get_workshop_notification(notification_id: str) -> dict:
 
 @app.patch("/workshop-notifications/{notification_id}/read", response_model=WorkshopNotificationOut)
 def mark_workshop_notification_read(notification_id: str) -> dict:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         notification = db.execute(
-            "SELECT * FROM workshop_notifications WHERE id = ?",
+            "SELECT * FROM workshop_notifications WHERE id = %s",
             (notification_id,),
         ).fetchone()
         if not notification:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workshop notification not found")
         db.execute(
-            "UPDATE workshop_notifications SET read_at = COALESCE(read_at, ?) WHERE id = ?",
+            "UPDATE workshop_notifications SET read_at = COALESCE(read_at, %s) WHERE id = %s",
             (utc_now_iso(), notification_id),
         )
         updated = db.execute(
-            "SELECT * FROM workshop_notifications WHERE id = ?",
+            "SELECT * FROM workshop_notifications WHERE id = %s",
             (notification_id,),
         ).fetchone()
     return dict(updated)
@@ -2346,19 +2352,19 @@ def mark_workshop_notification_read(notification_id: str) -> dict:
 
 @app.patch("/notifications/{notification_id}/read", response_model=AppNotificationOut)
 def mark_notification_read(notification_id: str) -> dict:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         notification = db.execute(
-            "SELECT * FROM app_notifications WHERE id = ?",
+            "SELECT * FROM app_notifications WHERE id = %s",
             (notification_id,),
         ).fetchone()
         if not notification:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found")
         db.execute(
-            "UPDATE app_notifications SET read_at = COALESCE(read_at, ?) WHERE id = ?",
+            "UPDATE app_notifications SET read_at = COALESCE(read_at, %s) WHERE id = %s",
             (utc_now_iso(), notification_id),
         )
         updated = db.execute(
-            "SELECT * FROM app_notifications WHERE id = ?",
+            "SELECT * FROM app_notifications WHERE id = %s",
             (notification_id,),
         ).fetchone()
     return dict(updated)
@@ -2375,19 +2381,19 @@ def register_payment(payload: PaymentCreate) -> dict:
         "status": payload.status.value,
         "created_at": utc_now_iso(),
     }
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         fetch_work_order(db, payload.work_order_id)
         db.execute(
             """
             INSERT INTO payments (id, work_order_id, amount, provider, reference, status, created_at)
-            VALUES (:id, :work_order_id, :amount, :provider, :reference, :status, :created_at)
+            VALUES (%(id)s, %(work_order_id)s, %(amount)s, %(provider)s, %(reference)s, %(status)s, %(created_at)s)
             """,
             payment,
         )
     return payment
 
 
-app.include_router(create_router(lambda: DB_PATH))
+app.include_router(create_router(lambda: DATABASE_URL))
 
 from services.workshop_service.web_sync import create_router as create_sync_router
-app.include_router(create_sync_router(lambda: DB_PATH))
+app.include_router(create_sync_router(lambda: DATABASE_URL))

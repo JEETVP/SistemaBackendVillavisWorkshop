@@ -1,54 +1,67 @@
+name: tallerplus-dev
+
+x-backend: &backend
+  build: .
+  env_file: .env
+  restart: unless-stopped
+
 services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run scripts/create_env.py}
+      IDENTITY_DB_PASSWORD: ${IDENTITY_DB_PASSWORD:?Run scripts/create_env.py}
+      CUSTOMERS_DB_PASSWORD: ${CUSTOMERS_DB_PASSWORD:?Run scripts/create_env.py}
+      WORKSHOP_DB_PASSWORD: ${WORKSHOP_DB_PASSWORD:?Run scripts/create_env.py}
+    ports: ['127.0.0.1:5432:5432']
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/postgres-init.sh:/docker-entrypoint-initdb.d/10-tallerplus.sh:ro
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -h 127.0.0.1 -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   api_gateway:
-    build: .
-    env_file: .env
-    command: uvicorn services.api_gateway.app:app --host 0.0.0.0 --port 8000
+    <<: *backend
+    command: [uvicorn, services.api_gateway.app:app, --host, 0.0.0.0, --port, '8000', --no-proxy-headers]
     environment:
       IDENTITY_SERVICE_URL: http://identity_service:8003
       CUSTOMERS_SERVICE_URL: http://customer_service:8001
       WORKSHOP_SERVICE_URL: http://workshop_service:8002
-    ports:
-      - "8000:8000"
+    ports: ['127.0.0.1:8000:8000']
     depends_on:
-      - identity_service
-      - customer_service
-      - workshop_service
+      identity_service: {condition: service_started}
+      customer_service: {condition: service_started}
+      workshop_service: {condition: service_started}
 
   identity_service:
-    build: .
-    env_file: .env
-    command: uvicorn services.identity_service.app:app --host 0.0.0.0 --port 8003
+    <<: *backend
+    command: [uvicorn, services.identity_service.app:app, --host, 0.0.0.0, --port, '8003', --no-proxy-headers]
     environment:
-      IDENTITY_DB_PATH: /data/identity.db
+      IDENTITY_DATABASE_URL: postgresql://identity:${IDENTITY_DB_PASSWORD}@postgres:5432/identity
       IDENTITY_PRIVATE_KEY_PATH: /data/jwt_private.pem
-    expose:
-      - "8003"
-    volumes:
-      - identity_data:/data
+    volumes: [identity_keys:/data]
+    depends_on:
+      postgres: {condition: service_healthy}
 
   customer_service:
-    build: .
-    env_file: .env
-    command: uvicorn services.customer_service.app:app --host 0.0.0.0 --port 8001
+    <<: *backend
+    command: [uvicorn, services.customer_service.app:app, --host, 0.0.0.0, --port, '8001', --no-proxy-headers]
     environment:
-      CUSTOMERS_DB_PATH: /data/customers.db
-    expose:
-      - "8001"
-    volumes:
-      - customer_data:/data
+      CUSTOMERS_DATABASE_URL: postgresql://customers:${CUSTOMERS_DB_PASSWORD}@postgres:5432/customers
+    depends_on:
+      postgres: {condition: service_healthy}
 
   workshop_service:
-    build: .
-    env_file: .env
-    command: uvicorn services.workshop_service.app:app --host 0.0.0.0 --port 8002
+    <<: *backend
+    command: [uvicorn, services.workshop_service.app:app, --host, 0.0.0.0, --port, '8002', --no-proxy-headers]
     environment:
-      WORKSHOP_DB_PATH: /data/workshop.db
-    expose:
-      - "8002"
-    volumes:
-      - workshop_data:/data
+      WORKSHOP_DATABASE_URL: postgresql://workshop:${WORKSHOP_DB_PASSWORD}@postgres:5432/workshop
+    depends_on:
+      postgres: {condition: service_healthy}
 
 volumes:
-  identity_data:
-  customer_data:
-  workshop_data:
+  postgres_data:
+  identity_keys:

@@ -7,7 +7,15 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres-test-only
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -h 127.0.0.1 -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
     env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres-test-only@127.0.0.1:5432/postgres
       APP_ORIGIN: http://localhost:5173
       INTERNAL_SERVICE_TOKEN: ci-service-token-not-a-production-secret
     steps:
@@ -18,16 +26,12 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: python -m unittest discover -s tests -v
-      - name: Build production backend
+      - name: Build PostgreSQL backend
         run: docker build -t tallerplus-backend:ci .
-
-  release:
-    needs: verify
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AZURE_DEPLOY_ENABLED == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Request joint frontend/backend release after successful CI
+      - name: Smoke test Render entrypoint with real PostgreSQL
         env:
-          GH_TOKEN: ${{ secrets.FRONTEND_DISPATCH_TOKEN }}
-          BACKEND_SHA: ${{ github.sha }}
-        run: gh workflow run azure-release.yml --repo Jose-Esp-Ordas/TallerPlusWEB --ref main -f backend_ref="$BACKEND_SHA"
+          SMOKE_PROXY_TOKEN: ci-cloudflare-proxy-token-not-a-production-secret
+        run: |
+          docker run -d --name render-smoke --network host -e APP_ENV=production -e APP_ORIGIN=https://tallerplus.pages.dev -e DATABASE_URL="$TEST_DATABASE_URL" -e INTERNAL_SERVICE_TOKEN="$INTERNAL_SERVICE_TOKEN" -e BACKEND_PROXY_TOKEN="$SMOKE_PROXY_TOKEN" -e PORT=10000 tallerplus-backend:ci
+          trap 'docker logs render-smoke; docker rm -f render-smoke' EXIT
+          python scripts/smoke_render.py

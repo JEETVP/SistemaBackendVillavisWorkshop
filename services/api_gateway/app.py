@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import hmac
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from typing import Any
@@ -69,6 +70,19 @@ app = FastAPI(
     description="Entrada principal del backend distribuido de Taller+ para Villavis Workshop.",
     version="1.0.0",
 )
+
+
+@app.middleware("http")
+async def render_frontend_proxy(request: Request, call_next):
+    if os.getenv("RENDER_DEPLOYMENT") == "true":
+        if request.url.path == "/health":
+            return await call_next(request)
+        if not request.url.path.startswith("/api/"):
+            return JSONResponse({"error":"Ruta no disponible."}, status_code=404)
+        expected = os.getenv("BACKEND_PROXY_TOKEN", "")
+        if not expected or not hmac.compare_digest(request.headers.get("X-Frontend-Token", ""), expected):
+            return JSONResponse({"error":"Acceso al servidor no permitido."}, status_code=403, headers={"Cache-Control":"no-store"})
+    return await call_next(request)
 
 
 @app.exception_handler(StarletteHTTPException)

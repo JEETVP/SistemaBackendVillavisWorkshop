@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import os
-import sqlite3
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Response, status
 
-from services.common.database import connect, db_path_from_env
+from services.common.database import Connection, IntegrityError, table_columns, write_lock, connect, database_url_from_env
 from services.common.time import utc_now_iso
 from services.identity_service.web import create_router, init_web_identity
 from services.identity_service.schemas import (
@@ -27,7 +26,7 @@ from services.identity_service.security import (
     verify_token,
 )
 
-DB_PATH = db_path_from_env("IDENTITY_DB_PATH", "data/identity.db")
+DATABASE_URL = database_url_from_env("IDENTITY_DATABASE_URL")
 
 app = FastAPI(
     title="Villavis Identity Service",
@@ -36,24 +35,24 @@ app = FastAPI(
 )
 
 
-def public_user(data: sqlite3.Row | dict) -> dict:
+def public_user(data: dict | dict) -> dict:
     user = dict(data)
     user.pop("password_hash", None)
     return user
 
 
-def create_session(db: sqlite3.Connection, user_id: str) -> str:
-    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+def create_session(db: Connection, user_id: str) -> str:
+    user = db.execute("SELECT * FROM users WHERE id = %s", (user_id,)).fetchone()
     token = create_token(dict(user))
     db.execute(
-        "INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)",
+        "INSERT INTO sessions (token, user_id, created_at) VALUES (%s, %s, %s)",
         (token, user_id, utc_now_iso()),
     )
     return token
 
 
 def init_db(db_path: str | None = None) -> None:
-    with connect(db_path or DB_PATH) as db:
+    with connect(db_path or DATABASE_URL) as db:
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -69,7 +68,7 @@ def init_db(db_path: str | None = None) -> None:
             )
             """
         )
-        existing_columns = {row["name"] for row in db.execute("PRAGMA table_info(users)").fetchall()}
+        existing_columns = table_columns(db, "users")
         if "phone" not in existing_columns:
             db.execute("ALTER TABLE users ADD COLUMN phone TEXT")
         db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users(phone) WHERE phone IS NOT NULL")
@@ -90,14 +89,14 @@ def init_db(db_path: str | None = None) -> None:
         bootstrap_admin_phone = normalize_phone(bootstrap_admin_phone) if bootstrap_admin_phone else ""
         bootstrap_admin_password = os.getenv("IDENTITY_BOOTSTRAP_ADMIN_PASSWORD")
         if bootstrap_admin_phone and bootstrap_admin_password:
-            existing = db.execute("SELECT id FROM users WHERE phone = ?", (bootstrap_admin_phone,)).fetchone()
+            existing = db.execute("SELECT id FROM users WHERE phone = %s", (bootstrap_admin_phone,)).fetchone()
             if not existing:
                 legacy_email = os.getenv("IDENTITY_BOOTSTRAP_ADMIN_EMAIL", "").lower()
                 if legacy_email:
-                    existing = db.execute("SELECT id FROM users WHERE email = ?", (legacy_email,)).fetchone()
+                    existing = db.execute("SELECT id FROM users WHERE email = %s", (legacy_email,)).fetchone()
                     if existing:
                         db.execute(
-                            "UPDATE users SET phone = ?, password_hash = ? WHERE id = ?",
+                            "UPDATE users SET phone = %s, password_hash = %s WHERE id = %s",
                             (bootstrap_admin_phone, hash_password(bootstrap_admin_password), existing["id"]),
                         )
             if not existing:
@@ -107,7 +106,7 @@ def init_db(db_path: str | None = None) -> None:
                         id, name, phone, email, password_hash, role,
                         customer_id, primary_vehicle_id, created_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         str(uuid4()),
@@ -131,6 +130,11 @@ def on_startup() -> None:
 
 @app.get("/health")
 def health() -> dict:
+    try:
+        with connect(DATABASE_URL) as db:
+            db.execute("SELECT 1")
+    except Exception:
+        raise HTTPException(503, "PostgreSQL is unavailable")
     return {"service": "identity_service", "status": "ok"}
 
 
@@ -153,7 +157,7 @@ def register_client(payload: ClientUserRegister) -> dict:
         "primary_vehicle_id": payload.primary_vehicle_id,
         "created_at": utc_now_iso(),
     }
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         try:
             db.execute(
                 """
@@ -162,13 +166,13 @@ def register_client(payload: ClientUserRegister) -> dict:
                     customer_id, primary_vehicle_id, created_at
                 )
                 VALUES (
-                    :id, :name, :phone, :email, :password_hash, :role,
-                    :customer_id, :primary_vehicle_id, :created_at
+                    %(id)s, %(name)s, %(phone)s, %(email)s, %(password_hash)s, %(role)s,
+                    %(customer_id)s, %(primary_vehicle_id)s, %(created_at)s
                 )
                 """,
                 user,
             )
-        except sqlite3.IntegrityError as exc:
+        except IntegrityError as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Phone already registered") from exc
         token = create_session(db, user["id"])
     return {"access_token": token, "user": public_user(user)}
@@ -194,7 +198,7 @@ def register_staff_user(payload: StaffUserRegister) -> dict:
         "created_at": utc_now_iso(),
     }
 
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         try:
             db.execute(
                 """
@@ -203,13 +207,13 @@ def register_staff_user(payload: StaffUserRegister) -> dict:
                     customer_id, primary_vehicle_id, created_at
                 )
                 VALUES (
-                    :id, :name, :phone, :email, :password_hash, :role,
-                    :customer_id, :primary_vehicle_id, :created_at
+                    %(id)s, %(name)s, %(phone)s, %(email)s, %(password_hash)s, %(role)s,
+                    %(customer_id)s, %(primary_vehicle_id)s, %(created_at)s
                 )
                 """,
                 user,
             )
-        except sqlite3.IntegrityError as exc:
+        except IntegrityError as exc:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Phone already registered",
@@ -224,8 +228,8 @@ def register_staff_user(payload: StaffUserRegister) -> dict:
 @app.post("/auth/staff/login", response_model=TokenOut)
 def login(payload: StaffLogin) -> dict:
     phone = normalize_phone(payload.phone)
-    with connect(DB_PATH) as db:
-        row = db.execute("SELECT * FROM users WHERE phone = ?", (phone,)).fetchone()
+    with connect(DATABASE_URL) as db:
+        row = db.execute("SELECT * FROM users WHERE phone = %s", (phone,)).fetchone()
         if (
             not row
             or row["state"] != "active"
@@ -248,13 +252,13 @@ def validate_session(payload: TokenValidate) -> dict:
         claims = verify_token(payload.access_token, get_public_key_pem())
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         row = db.execute(
             """
             SELECT users.*
             FROM sessions
             JOIN users ON users.id = sessions.user_id
-            WHERE sessions.token = ? AND sessions.revoked_at IS NULL
+            WHERE sessions.token = %s AND sessions.revoked_at IS NULL
             """,
             (payload.access_token,),
         ).fetchone()
@@ -266,15 +270,15 @@ def validate_session(payload: TokenValidate) -> dict:
 
 @app.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(payload: TokenValidate) -> Response:
-    with connect(DB_PATH) as db:
+    with connect(DATABASE_URL) as db:
         db.execute(
-            "UPDATE sessions SET revoked_at = ? WHERE token = ? AND revoked_at IS NULL",
+            "UPDATE sessions SET revoked_at = %s WHERE token = %s AND revoked_at IS NULL",
             (utc_now_iso(), payload.access_token),
         )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-app.include_router(create_router(lambda: DB_PATH, create_session))
+app.include_router(create_router(lambda: DATABASE_URL, create_session))
 
 from services.identity_service.web_sync import create_router as create_sync_router
-app.include_router(create_sync_router(lambda: DB_PATH))
+app.include_router(create_sync_router(lambda: DATABASE_URL))

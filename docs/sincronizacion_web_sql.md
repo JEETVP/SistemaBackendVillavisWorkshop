@@ -1,3 +1,5 @@
+> Estado actual: PostgreSQL y Render, sin importaci?n de datos. Ver [configuraci?n actual](postgresql-render.md). Las referencias a SQLite de este documento son hist?ricas.
+
 # Sincronización web con SQL
 
 La web TallerPlusWEB usa la sesión HttpOnly del gateway y las bases SQLite de identidad, clientes y taller. No usa MongoDB. Los módulos de configuración, personal, catálogo, solicitudes, cotizaciones, autorización, forma de pago, avances, fotos, registro independiente de vehículos, kilometraje, combustible y favoritos tienen escrituras en servidor.

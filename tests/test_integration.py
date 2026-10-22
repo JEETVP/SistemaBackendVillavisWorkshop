@@ -3,6 +3,11 @@ from contextlib import ExitStack
 from pathlib import Path
 from shutil import rmtree
 import unittest
+import os
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+import psycopg
+from psycopg import sql
+from services.common.database import close_pool
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -30,8 +35,31 @@ class ServiceFixture(unittest.TestCase):
                 raise RuntimeError("Test cleanup escaped its temporary directory")
             rmtree(directory)
         self.stack.callback(cleanup_database_files)
+        admin_url = os.getenv("TEST_DATABASE_URL")
+        if not admin_url:
+            raise RuntimeError("Set TEST_DATABASE_URL to an isolated PostgreSQL test database.")
+        parsed = urlsplit(admin_url)
+        schemas = []
+        urls = []
+        def cleanup_postgres():
+            for url in urls:
+                close_pool(url)
+            with psycopg.connect(admin_url, autocommit=True) as admin:
+                for schema in schemas:
+                    if not schema.startswith("test_" + directory.name + "_"):
+                        raise RuntimeError("Test cleanup escaped its schema namespace")
+                    admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
+        self.stack.callback(cleanup_postgres)
         for module, name in ((identity, "identity"), (customers, "customers"), (workshop, "workshop")):
-            self.stack.enter_context(patch.object(module, "DB_PATH", str(directory / f"{name}.db")))
+            schema = "test_" + directory.name + "_" + name
+            with psycopg.connect(admin_url, autocommit=True) as admin:
+                admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+            schemas.append(schema)
+            query = [(key,value) for key,value in parse_qsl(parsed.query) if key != "options"]
+            query.append(("options", "-csearch_path=" + schema))
+            url = urlunsplit(parsed._replace(query=urlencode(query)))
+            urls.append(url)
+            self.stack.enter_context(patch.object(module, "DATABASE_URL", url))
         original_key = security.ensure_private_key
         isolated_key = lambda: original_key(str(directory / "jwt.pem"))
         self.stack.enter_context(patch.object(security, "ensure_private_key", isolated_key))

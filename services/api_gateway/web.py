@@ -1,6 +1,7 @@
 """Browser API compatibility layer, backed by the canonical microservices."""
 from collections import OrderedDict
 import logging
+import ipaddress
 import os
 import time
 from uuid import uuid4
@@ -45,7 +46,13 @@ class BrowserRoute(APIRoute):
                 # Bounded memory, fixed 15-minute windows, based on the direct client address.
                 while self.limits and next(iter(self.limits.values()))[1] <= now:
                     self.limits.popitem(last=False)
-                key = (request.client.host if request.client else "unknown", request.url.path)
+                client_address = request.client.host if request.client else "unknown"
+                if os.getenv("RENDER_DEPLOYMENT") == "true":
+                    try:
+                        client_address = str(ipaddress.ip_address(request.headers.get("X-Frontend-Client-IP", "")))
+                    except ValueError:
+                        pass
+                key = (client_address, request.url.path)
                 count, until = self.limits.get(key, (0, now + 900))
                 self.limits[key] = (count + 1, until)
                 if len(self.limits) > 10_000:

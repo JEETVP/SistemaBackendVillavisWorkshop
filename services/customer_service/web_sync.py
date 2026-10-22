@@ -1,9 +1,8 @@
 """Owner-scoped vehicle writes backed by canonical customer SQL tables."""
 import json
-import sqlite3
 from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException
-from services.common.database import connect
+from services.common.database import Connection, IntegrityError, table_columns, write_lock, connect
 from services.common.internal import require_service_token
 from services.common.time import utc_now_iso
 from services.common.web_schemas import WebVehicle
@@ -23,11 +22,11 @@ def create_router(db_path):
         id = f'vehiculo-{uuid4()}'
         with connect(db_path()) as db:
             try:
-                db.execute('INSERT INTO vehicles (id, customer_id, plate, vin, brand, model, year, color, owner_name, created_at, web_details) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+                db.execute('INSERT INTO vehicles (id, customer_id, plate, vin, brand, model, year, color, owner_name, created_at, web_details) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)',
                     (id, actor['customer_id'], vehicle.placas or None, vehicle.numeroSerie, vehicle.marca, vehicle.modelo, vehicle.anio, vehicle.color, actor['name'], utc_now_iso(), json.dumps(extra)))
-            except sqlite3.IntegrityError as error:
+            except IntegrityError as error:
                 raise HTTPException(409, 'Ya existe un vehículo con estas placas o VIN.') from error
-            return dict(db.execute('SELECT * FROM vehicles WHERE id=?', (id,)).fetchone())
+            return dict(db.execute('SELECT * FROM vehicles WHERE id=%s', (id,)).fetchone())
 
     @router.post('/vehicles/{vehicle_id}/{action}')
     def update(vehicle_id: str, action: str, payload: InternalOperation):
@@ -38,8 +37,8 @@ def create_router(db_path):
         if model is None:
             raise HTTPException(404, 'Operación no disponible.')
         with connect(db_path()) as db:
-            db.execute('BEGIN IMMEDIATE')
-            row = db.execute('SELECT * FROM vehicles WHERE id=? AND customer_id=?', (vehicle_id, actor.get('customer_id'))).fetchone()
+            write_lock(db)
+            row = db.execute('SELECT * FROM vehicles WHERE id=%s AND customer_id=%s', (vehicle_id, actor.get('customer_id'))).fetchone()
             if not row:
                 raise HTTPException(403, 'No tienes acceso a este vehículo.')
             extra = json.loads(row['web_details'] or '{}')
@@ -60,6 +59,6 @@ def create_router(db_path):
                 total = model.kilometraje
                 records.append({'id': model.operationId, 'fecha': utc_now_iso(), 'kilometraje': total, 'litros': model.litros, 'tanqueLleno': model.tanqueLleno})
             extra['kilometraje'] = total
-            db.execute('UPDATE vehicles SET web_details=? WHERE id=?', (json.dumps(extra), vehicle_id))
-            return dict(db.execute('SELECT * FROM vehicles WHERE id=?', (vehicle_id,)).fetchone())
+            db.execute('UPDATE vehicles SET web_details=%s WHERE id=%s', (json.dumps(extra), vehicle_id))
+            return dict(db.execute('SELECT * FROM vehicles WHERE id=%s', (vehicle_id,)).fetchone())
     return router

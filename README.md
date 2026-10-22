@@ -1,5 +1,8 @@
 # Sistema Backend Villavis Workshop
 
+> **Estado actual:** PostgreSQL 17 y despliegue en Render. No se migran bases SQLite. Consultar [configuraci?n PostgreSQL/Render](docs/postgresql-render.md) y la gu?a de Cloudflare Pages en TallerPlusWEB. Los procedimientos anteriores de Azure/SQLite que permanezcan m?s abajo son hist?ricos.
+
+
 Backend distribuido en Python para un taller mecanico. La solucion esta organizada como microservicios independientes con un API Gateway al frente.
 
 ## Estado de integracion con TallerPlusWEB

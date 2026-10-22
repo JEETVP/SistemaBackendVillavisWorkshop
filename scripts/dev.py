@@ -14,6 +14,13 @@ from services.common.config import app_origin  # noqa: E402
 
 def main():
     app_origin()
+    from services.common.database import connect
+    for setting in ("IDENTITY_DATABASE_URL", "CUSTOMERS_DATABASE_URL", "WORKSHOP_DATABASE_URL"):
+        try:
+            with connect(os.getenv(setting, "")) as database:
+                database.execute("SELECT 1")
+        except Exception:
+            raise SystemExit(f"PostgreSQL is unavailable for {setting}. Configure .env and start PostgreSQL first.")
     if len(os.getenv("INTERNAL_SERVICE_TOKEN", "")) < 32:
         raise SystemExit("Configure INTERNAL_SERVICE_TOKEN with at least 32 characters in .env")
     host = os.getenv("API_HOST", "127.0.0.1")
