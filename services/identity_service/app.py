@@ -4,10 +4,11 @@ import os
 import sqlite3
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Response, status
 
 from services.common.database import connect, db_path_from_env
 from services.common.time import utc_now_iso
+from services.identity_service.web import create_router, init_web_identity
 from services.identity_service.schemas import (
     ClientUserRegister,
     StaffLogin,
@@ -51,8 +52,8 @@ def create_session(db: sqlite3.Connection, user_id: str) -> str:
     return token
 
 
-def init_db() -> None:
-    with connect(DB_PATH) as db:
+def init_db(db_path: str | None = None) -> None:
+    with connect(db_path or DB_PATH) as db:
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -72,6 +73,7 @@ def init_db() -> None:
         if "phone" not in existing_columns:
             db.execute("ALTER TABLE users ADD COLUMN phone TEXT")
         db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users(phone) WHERE phone IS NOT NULL")
+        init_web_identity(db)
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS sessions (
@@ -84,7 +86,8 @@ def init_db() -> None:
             """
         )
 
-        bootstrap_admin_phone = normalize_phone(os.getenv("IDENTITY_BOOTSTRAP_ADMIN_PHONE", ""))
+        bootstrap_admin_phone = os.getenv("IDENTITY_BOOTSTRAP_ADMIN_PHONE", "").strip()
+        bootstrap_admin_phone = normalize_phone(bootstrap_admin_phone) if bootstrap_admin_phone else ""
         bootstrap_admin_password = os.getenv("IDENTITY_BOOTSTRAP_ADMIN_PASSWORD")
         if bootstrap_admin_phone and bootstrap_admin_password:
             existing = db.execute("SELECT id FROM users WHERE phone = ?", (bootstrap_admin_phone,)).fetchone()
@@ -225,6 +228,7 @@ def login(payload: StaffLogin) -> dict:
         row = db.execute("SELECT * FROM users WHERE phone = ?", (phone,)).fetchone()
         if (
             not row
+            or row["state"] != "active"
             or not row["password_hash"]
             or not verify_password(payload.password, row["password_hash"])
         ):
@@ -255,15 +259,22 @@ def validate_session(payload: TokenValidate) -> dict:
             (payload.access_token,),
         ).fetchone()
 
-    if not row or row["id"] != claims["sub"]:
+    if not row or row["id"] != claims["sub"] or row["state"] != "active":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
     return public_user(row)
 
 
 @app.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
-def logout(payload: TokenValidate) -> None:
+def logout(payload: TokenValidate) -> Response:
     with connect(DB_PATH) as db:
         db.execute(
             "UPDATE sessions SET revoked_at = ? WHERE token = ? AND revoked_at IS NULL",
             (utc_now_iso(), payload.access_token),
         )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+app.include_router(create_router(lambda: DB_PATH, create_session))
+
+from services.identity_service.web_sync import create_router as create_sync_router
+app.include_router(create_sync_router(lambda: DB_PATH))

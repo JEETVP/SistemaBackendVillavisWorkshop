@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, status
 
 from services.common.database import connect, db_path_from_env
 from services.common.time import utc_now_iso
+from services.customer_service.web import create_router, init_web_customers
 from services.customer_service.schemas import (
     CustomerCreate,
     CustomerOut,
@@ -41,8 +42,8 @@ def ensure_vehicle_columns(db: sqlite3.Connection) -> None:
             db.execute(f"ALTER TABLE vehicles ADD COLUMN {column} {column_type}")
 
 
-def init_db() -> None:
-    with connect(DB_PATH) as db:
+def init_db(db_path: str | None = None) -> None:
+    with connect(db_path or DB_PATH) as db:
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS customers (
@@ -75,6 +76,7 @@ def init_db() -> None:
             """
         )
         ensure_vehicle_columns(db)
+        init_web_customers(db)
 
 
 @app.on_event("startup")
@@ -254,3 +256,9 @@ def get_vehicle_by_vin(vin: str) -> dict:
     if not vehicle:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found")
     return vehicle
+
+
+app.include_router(create_router(lambda: DB_PATH))
+
+from services.customer_service.web_sync import create_router as create_sync_router
+app.include_router(create_sync_router(lambda: DB_PATH))

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Priority(str, Enum):
@@ -56,7 +56,7 @@ class DepositPercentage(int, Enum):
 
 
 class WorkshopCreate(BaseModel):
-    name: str = Field(min_length=2, max_length=120)
+    name: str = Field(min_length=1, max_length=120)
     address: str = Field(min_length=5, max_length=240)
     photo_url: str | None = Field(default=None, max_length=500)
     phone: str | None = Field(default=None, max_length=40)
@@ -65,7 +65,7 @@ class WorkshopCreate(BaseModel):
 
 
 class WorkshopUpdate(BaseModel):
-    name: str | None = Field(default=None, min_length=2, max_length=120)
+    name: str | None = Field(default=None, min_length=1, max_length=120)
     address: str | None = Field(default=None, min_length=5, max_length=240)
     photo_url: str | None = Field(default=None, max_length=500)
     phone: str | None = Field(default=None, max_length=40)
@@ -323,7 +323,7 @@ class WorkOrderCreate(BaseModel):
     workshop_id: str
     customer_id: str
     vehicle_id: str
-    description: str = Field(min_length=5, max_length=500)
+    description: str = Field(min_length=1, max_length=1000)
     priority: Priority = Priority.normal
     appointment_id: str | None = None
 
@@ -365,6 +365,20 @@ class QuoteItemCreate(BaseModel):
     unit_price: float = Field(default=0, ge=0)
     service_id: str | None = None
     cylinder_count: CylinderCount | None = None
+
+
+class QuoteItemUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    description: str | None = Field(default=None, min_length=3, max_length=180)
+    quantity: int | None = Field(default=None, ge=1)
+    unit_price: float | None = Field(default=None, ge=0)
+
+    @field_validator("description", "quantity", "unit_price", mode="before")
+    @classmethod
+    def supplied_values_cannot_be_null(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("This field cannot be null")
+        return value.strip() if isinstance(value, str) else value
 
 
 class QuoteCreate(BaseModel):

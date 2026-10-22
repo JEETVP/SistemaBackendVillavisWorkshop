@@ -1,6 +1,7 @@
 services:
   api_gateway:
     build: .
+    env_file: .env
     command: uvicorn services.api_gateway.app:app --host 0.0.0.0 --port 8000
     environment:
       IDENTITY_SERVICE_URL: http://identity_service:8003
@@ -15,13 +16,11 @@ services:
 
   identity_service:
     build: .
+    env_file: .env
     command: uvicorn services.identity_service.app:app --host 0.0.0.0 --port 8003
     environment:
       IDENTITY_DB_PATH: /data/identity.db
       IDENTITY_PRIVATE_KEY_PATH: /data/jwt_private.pem
-      IDENTITY_BOOTSTRAP_ADMIN_PHONE: "5550000000"
-      IDENTITY_BOOTSTRAP_ADMIN_EMAIL: admin@villavis.test
-      IDENTITY_BOOTSTRAP_ADMIN_PASSWORD: password123
     expose:
       - "8003"
     volumes:
@@ -29,6 +28,7 @@ services:
 
   customer_service:
     build: .
+    env_file: .env
     command: uvicorn services.customer_service.app:app --host 0.0.0.0 --port 8001
     environment:
       CUSTOMERS_DB_PATH: /data/customers.db
@@ -39,6 +39,7 @@ services:
 
   workshop_service:
     build: .
+    env_file: .env
     command: uvicorn services.workshop_service.app:app --host 0.0.0.0 --port 8002
     environment:
       WORKSHOP_DB_PATH: /data/workshop.db

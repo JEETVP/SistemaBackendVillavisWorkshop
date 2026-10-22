@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
+from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from services.api_gateway.schemas import (
     AppointmentCreate,
@@ -15,6 +20,7 @@ from services.api_gateway.schemas import (
     PaymentCreate,
     QuoteCreate,
     QuoteItemCreate,
+    QuoteItemUpdate,
     QuoteStatusUpdate,
     RecommendationCreate,
     ServiceCartCheckoutCreate,
@@ -37,18 +43,48 @@ from services.api_gateway.schemas import (
     WorkOrderStatusUpdate,
 )
 from services.common.security import verify_token
+from services.api_gateway.web import create_router
 
-IDENTITY_SERVICE_URL = os.getenv("IDENTITY_SERVICE_URL", "http://localhost:8003")
-CUSTOMERS_SERVICE_URL = os.getenv("CUSTOMERS_SERVICE_URL", "http://localhost:8001")
-WORKSHOP_SERVICE_URL = os.getenv("WORKSHOP_SERVICE_URL", "http://localhost:8002")
+IDENTITY_SERVICE_URL = os.getenv("IDENTITY_SERVICE_URL", "http://127.0.0.1:8003")
+CUSTOMERS_SERVICE_URL = os.getenv("CUSTOMERS_SERVICE_URL", "http://127.0.0.1:8001")
+WORKSHOP_SERVICE_URL = os.getenv("WORKSHOP_SERVICE_URL", "http://127.0.0.1:8002")
 REQUEST_TIMEOUT = 8.0
 PUBLIC_KEY_CACHE: str | None = None
 
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    # One pool per worker: do not rebuild SSL/proxy configuration for each hop.
+    previous = getattr(application.state, "service_client", None)
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        application.state.service_client = client
+        try:
+            yield
+        finally:
+            application.state.service_client = previous
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="Villavis Workshop API Gateway",
     description="Entrada principal del backend distribuido de Taller+ para Villavis Workshop.",
     version="1.0.0",
 )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def browser_http_error(request: Request, error: StarletteHTTPException):
+    if request.url.path.startswith("/api/"):
+        return JSONResponse({"error": error.detail if isinstance(error.detail, str) else "Revisa los datos enviados."},
+            status_code=error.status_code, headers={"Cache-Control": "no-store", **(error.headers or {})})
+    return await http_exception_handler(request, error)
+
+
+@app.exception_handler(RequestValidationError)
+async def browser_validation_error(request: Request, error: RequestValidationError):
+    if request.url.path.startswith("/api/"):
+        message = error.errors()[0].get("msg", "Revisa los datos del formulario.")
+        return JSONResponse({"error": message}, status_code=400, headers={"Cache-Control": "no-store"})
+    return await request_validation_exception_handler(request, error)
 
 
 async def request_json(
@@ -61,8 +97,11 @@ async def request_json(
 ) -> tuple[Any, int]:
     url = f"{base_url}{path}"
     try:
-        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-            response = await client.request(method, url, json=json, params=params)
+        client = getattr(app.state, "service_client", None)
+        if client is None or client.is_closed:
+            raise HTTPException(503, "El gateway todavía está iniciando sus conexiones internas.")
+        response = await client.request(method, url, json=json, params=params,
+            headers={"X-Service-Token": os.getenv("INTERNAL_SERVICE_TOKEN", "")})
     except httpx.RequestError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -89,7 +128,7 @@ def extract_token(authorization: str | None) -> str:
     return token
 
 
-async def current_user(authorization: str | None = Header(default=None)) -> dict:
+async def authenticate_user(authorization: str | None) -> dict:
     token = extract_token(authorization)
     global PUBLIC_KEY_CACHE
     if PUBLIC_KEY_CACHE is None:
@@ -116,6 +155,16 @@ async def current_user(authorization: str | None = Header(default=None)) -> dict
     if data.get("id") != claims.get("sub") or data.get("role") != claims.get("role"):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token claims do not match session")
     return data
+
+
+async def current_user(authorization: str | None = Header(default=None)) -> dict:
+    user = await authenticate_user(authorization)
+    # Public workshop signup must not grant access to the older global-staff API.
+    # Its native resource permissions will migrate to workshop memberships later.
+    if user.get("workshop_id"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Workshop accounts must use the scoped /api browser endpoints")
+    return user
 
 
 async def optional_current_user(authorization: str | None = Header(default=None)) -> dict | None:
@@ -441,6 +490,19 @@ async def create_vehicle(
     return data
 
 
+@app.get("/customers/{customer_id}/vehicles")
+async def list_customer_vehicles(customer_id: str, user: dict = Depends(current_user)) -> Any:
+    ensure_customer_access(user, customer_id)
+    data, code = await request_json("GET", CUSTOMERS_SERVICE_URL, f"/customers/{customer_id}/vehicles")
+    raise_for_service_error(data, code)
+    return data
+
+
+@app.get("/vehicles/{vehicle_id}")
+async def get_vehicle(vehicle_id: str, user: dict = Depends(current_user)) -> Any:
+    return await ensure_vehicle_access(user, vehicle_id)
+
+
 @app.patch("/vehicles/{vehicle_id}")
 async def update_vehicle(
     vehicle_id: str,
@@ -460,6 +522,13 @@ async def update_vehicle(
 @app.get("/vehicles/by-plate/{plate}")
 async def get_vehicle_by_plate(plate: str, _: dict = Depends(require_roles("staff", "admin"))) -> Any:
     data, code = await request_json("GET", CUSTOMERS_SERVICE_URL, f"/vehicles/by-plate/{plate}")
+    raise_for_service_error(data, code)
+    return data
+
+
+@app.get("/vehicles/by-vin/{vin}")
+async def get_vehicle_by_vin(vin: str, _: dict = Depends(require_roles("staff", "admin"))) -> Any:
+    data, code = await request_json("GET", CUSTOMERS_SERVICE_URL, f"/vehicles/by-vin/{vin}")
     raise_for_service_error(data, code)
     return data
 
@@ -810,7 +879,12 @@ async def create_appointment(
     user: dict = Depends(current_user),
 ) -> Any:
     ensure_customer_access(user, payload.customer_id)
-    await ensure_vehicle_access(user, payload.vehicle_id)
+    vehicle = await ensure_vehicle_access(user, payload.vehicle_id)
+    if vehicle["customer_id"] != payload.customer_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Vehicle does not belong to the customer",
+        )
     data, code = await request_json(
         "POST",
         WORKSHOP_SERVICE_URL,
@@ -1043,6 +1117,32 @@ async def get_quote(quote_id: str, user: dict = Depends(current_user)) -> Any:
     raise_for_service_error(order, order_code)
     ensure_customer_access(user, order["customer_id"])
     return quote
+
+
+@app.patch("/quotes/{quote_id}/items/{item_id}")
+async def update_quote_item(
+    quote_id: str,
+    item_id: str,
+    payload: QuoteItemUpdate,
+    _: dict = Depends(require_roles("staff", "admin")),
+) -> Any:
+    data, code = await request_json(
+        "PATCH", WORKSHOP_SERVICE_URL, f"/quotes/{quote_id}/items/{item_id}",
+        json=payload.model_dump(exclude_unset=True),
+    )
+    raise_for_service_error(data, code)
+    return data
+
+
+@app.delete("/quotes/{quote_id}/items/{item_id}")
+async def delete_quote_item(
+    quote_id: str,
+    item_id: str,
+    _: dict = Depends(require_roles("staff", "admin")),
+) -> Any:
+    data, code = await request_json("DELETE", WORKSHOP_SERVICE_URL, f"/quotes/{quote_id}/items/{item_id}")
+    raise_for_service_error(data, code)
+    return data
 
 
 @app.patch("/quotes/{quote_id}/status")
@@ -1289,3 +1389,6 @@ async def get_customer_summary(customer_id: str, user: dict = Depends(current_us
         "vehicles": vehicles,
         "work_orders": orders,
     }
+
+
+app.include_router(create_router(request_json, authenticate_user))

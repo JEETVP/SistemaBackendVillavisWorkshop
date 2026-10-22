@@ -2,6 +2,10 @@
 
 Backend distribuido en Python para un taller mecanico. La solucion esta organizada como microservicios independientes con un API Gateway al frente.
 
+## Estado de integracion con TallerPlusWEB
+
+La primera fase de migracion ya conecta TallerPlusWEB con FastAPI para registro de talleres, acceso, sesiones, recepcion, activacion y directorio. Las 9 rutas HTTP del cliente web estan cubiertas bajo `/api`. Los registros existentes de la API Node se pueden importar conservando sus IDs y credenciales. Consulta [Migracion desde Node](docs/migracion_node_fastapi.md) para arranque, `.env`, importacion y limites de esta fase. Catalogo, avances y otros adaptadores locales todavia requieren migracion.
+
 ## Arquitectura
 
 - `api_gateway`: entrada principal del sistema. Agrega respuestas y coordina llamadas entre servicios.
@@ -16,6 +20,8 @@ Backend distribuido en Python para un taller mecanico. La solucion esta organiza
 - Docker y Docker Compose, opcional pero recomendado
 
 ## Ejecutar con Docker Compose
+
+Crear `.env` con `python scripts/create_env.py` antes de arrancar. Este archivo contiene la configuracion local y un token interno aleatorio; no se versiona. `.env.example` es la plantilla sin secretos reales. Para produccion, configurar `APP_ENV=production` y `APP_ORIGIN` con el dominio HTTPS.
 
 ```bash
 docker compose up --build
@@ -35,6 +41,15 @@ Documentacion interactiva:
 En Docker Compose solo se expone el gateway para evitar saltarse las validaciones de sesion y roles.
 
 ## Ejecutar localmente sin Docker
+
+En Windows, despues de instalar dependencias:
+
+```powershell
+python scripts/create_env.py
+.\.venv\Scripts\python.exe scripts/dev.py
+```
+
+El lanzador inicia los cuatro procesos y los detiene con Ctrl+C. En otra terminal, desde TallerPlusWEB, `npm.cmd run dev` inicia Vite y su proxy a FastAPI. El frontend ya no inicia Node como API.
 
 En Ubuntu/WSL puede ser necesario instalar soporte de entornos virtuales:
 
@@ -141,9 +156,9 @@ curl -X POST http://localhost:8000/auth/staff/login \
   -d '{"phone":"5550000000","password":"password123"}'
 ```
 
-En Docker Compose se crea este administrador por variables de entorno solo para desarrollo; cambia esas credenciales si se usa fuera de pruebas. El endpoint `POST /auth/staff/login` acepta el mismo formato de telefono y contrasena y solo permite cuentas del personal.
+Este ejemplo requiere configurar previamente las variables opcionales `IDENTITY_BOOTSTRAP_ADMIN_PHONE` y `IDENTITY_BOOTSTRAP_ADMIN_PASSWORD` del `.env`; no se crean administradores ni credenciales demo automaticamente. El endpoint `POST /auth/staff/login` acepta telefono y contrasena. La web registra al encargado del taller con correo y usa `POST /api/auth/login`.
 
-Las contrasenas se guardan con PBKDF2-HMAC-SHA256, sal aleatoria por usuario y 120,000 iteraciones. Las sesiones son JWT RS256 con expiracion de una hora: identidad firma con la clave privada persistida en el volumen `identity_data`, y el gateway obtiene la clave publica de `GET /auth/public-key` para validar firma, emisor, audiencia y expiracion. El gateway consulta despues si la sesion sigue activa para respetar el cierre de sesion.
+Las contrasenas nuevas se guardan con PBKDF2-HMAC-SHA256, sal aleatoria por usuario y 120,000 iteraciones; las importadas de Node conservan su verificador scrypt. Las sesiones son JWT RS256 con expiracion configurable por `JWT_TTL_SECONDS` (12 horas en la plantilla local). Identidad firma con la clave privada persistida y el gateway valida firma, emisor, audiencia, expiracion y revocacion. La API de navegador entrega el JWT exclusivamente en una cookie HttpOnly; la API nativa acepta Bearer.
 
 Crear taller:
 
@@ -422,6 +437,16 @@ curl -X PATCH http://localhost:8000/quotes/QUOTE_ID/status \
 
 Gateway:
 
+- `GET /api/health`
+- `POST /api/auth/workshops`
+- `POST /api/auth/login`
+- `GET /api/auth/session`
+- `POST /api/auth/logout`
+- `GET /api/workshops`
+- `POST /api/workshop/intake`
+- `POST /api/workshop/activation`
+- `POST /api/activation/validate`
+- `POST /api/activation/complete`
 - `GET /health`
 - `POST /auth/register`
 - `POST /auth/login`
@@ -442,6 +467,10 @@ Gateway:
 - `GET /customers`
 - `GET /customers/{customer_id}`
 - `POST /customers/{customer_id}/vehicles`
+- `GET /customers/{customer_id}/vehicles`
+- `GET /vehicles/{vehicle_id}`
+- `GET /vehicles/by-plate/{plate}`
+- `GET /vehicles/by-vin/{vin}`
 - `PATCH /vehicles/{vehicle_id}`
 - `GET /customers/{customer_id}/summary`
 - `POST /services`
@@ -478,6 +507,8 @@ Gateway:
 - `POST /quotes`
 - `GET /quotes/{quote_id}`
 - `POST /quotes/{quote_id}/items`
+- `PATCH /quotes/{quote_id}/items/{item_id}`
+- `DELETE /quotes/{quote_id}/items/{item_id}`
 - `PATCH /quotes/{quote_id}/status`
 - `POST /work-orders/{order_id}/evidence`
 - `GET /work-orders/{order_id}/evidence`
@@ -502,3 +533,24 @@ El registro publico crea cuentas `client` a partir de los datos del vehiculo y r
 El sistema usa HTTP entre servicios para demostrar comunicacion distribuida y bases de datos separadas para evitar acoplamiento directo. SQLite permite correr el proyecto sin infraestructura adicional, pero la separacion facilita migrar cada servicio a PostgreSQL u otro motor cuando el proyecto crezca.
 
 El alcance actual registra apartados/pagos de forma manual. La integracion real con Stripe queda preparada como siguiente fase mediante un proveedor externo y webhooks, tal como plantea la propuesta.
+
+## Verificacion
+
+Con las dependencias instaladas en el entorno virtual:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe scripts/audit_endpoints.py --frontend ..\TallerPlusWEB --check
+```
+
+Las 20 pruebas usan los tres microservicios reales a traves de HTTP ASGI, sus validaciones, JWT y SQLite temporales dentro de `data/test-runs`; incluyen el contrato web, compensacion de fallos e importacion desde Node. No utilizan bases existentes ni servicios externos. El auditor compara las rutas del cliente HTTP del frontend con las declaraciones del gateway; las 10 llamadas actuales (9 rutas distintas) tienen coincidencia directa. Solo comprueba presencia de rutas; las pruebas de integracion verifican ademas contratos y sesiones.
+
+La edicion de partidas acepta `description`, `quantity` y `unit_price`, recalcula el subtotal y devuelve la cotizacion completa. Las cotizaciones aceptadas o rechazadas no permiten cambios de partidas ni reapertura; un cambio de precio requiere una cotizacion nueva. Repetir el mismo estado es idempotente.
+
+## Despliegue en Azure y CI/CD
+
+La configuraci?n de producci?n est? en `TallerPlusWEB/deploy/`: VM de Ubuntu, Docker Compose, HTTPS, Azure Container Registry y publicaci?n conjunta de ambos repositorios. El backend conserva sus tres bases SQLite y su clave de firma en vol?menes sobre un disco administrado local de la VM. No se utiliza MongoDB ni se han convertido las bases a Azure SQL.
+
+`.github/workflows/ci.yml` ejecuta las pruebas SQL y construye este Dockerfile en cada push o pull request. El flujo `Azure VM release` del frontend descarga la revisi?n elegida de este repositorio, prueba ambos proyectos, publica sus im?genes y despliega mediante Azure Run Command. Requiere subir los cambios de ambos repositorios antes de lanzarlo. Consultar `TallerPlusWEB/docs/azure-vm.md` para crear los recursos y configurar OIDC, permisos y variables.
+
+La imagen no incluye datos, archivos `.env` ni claves privadas. Se ejecuta como UID 10001. En instalaciones Docker anteriores, revisar la propiedad de los vol?menes antes de cambiar desde una imagen que se ejecutaba como root. El procedimiento de Azure inicializa vol?menes nuevos; no importa autom?ticamente el contenido de las bases de desarrollo.

@@ -1,0 +1,1130 @@
+{
+  "scope": "Static HTTP route overlap only; schemas, auth and local storage require separate review.",
+  "backend_routes": {
+    "api_gateway": [
+      {
+        "method": "GET",
+        "path": "/admin/dashboard",
+        "file": "services/api_gateway/app.py",
+        "line": 231
+      },
+      {
+        "method": "GET",
+        "path": "/appointments",
+        "file": "services/api_gateway/app.py",
+        "line": 883
+      },
+      {
+        "method": "POST",
+        "path": "/appointments",
+        "file": "services/api_gateway/app.py",
+        "line": 859
+      },
+      {
+        "method": "GET",
+        "path": "/appointments/{appointment_id}",
+        "file": "services/api_gateway/app.py",
+        "line": 906
+      },
+      {
+        "method": "PATCH",
+        "path": "/appointments/{appointment_id}/status",
+        "file": "services/api_gateway/app.py",
+        "line": 918
+      },
+      {
+        "method": "POST",
+        "path": "/auth/login",
+        "file": "services/api_gateway/app.py",
+        "line": 326
+      },
+      {
+        "method": "POST",
+        "path": "/auth/logout",
+        "file": "services/api_gateway/app.py",
+        "line": 379
+      },
+      {
+        "method": "GET",
+        "path": "/auth/me",
+        "file": "services/api_gateway/app.py",
+        "line": 392
+      },
+      {
+        "method": "POST",
+        "path": "/auth/register",
+        "file": "services/api_gateway/app.py",
+        "line": 272
+      },
+      {
+        "method": "POST",
+        "path": "/auth/staff/login",
+        "file": "services/api_gateway/app.py",
+        "line": 348
+      },
+      {
+        "method": "POST",
+        "path": "/auth/staff/register",
+        "file": "services/api_gateway/app.py",
+        "line": 362
+      },
+      {
+        "method": "GET",
+        "path": "/customers",
+        "file": "services/api_gateway/app.py",
+        "line": 444
+      },
+      {
+        "method": "POST",
+        "path": "/customers",
+        "file": "services/api_gateway/app.py",
+        "line": 427
+      },
+      {
+        "method": "GET",
+        "path": "/customers/{customer_id}",
+        "file": "services/api_gateway/app.py",
+        "line": 451
+      },
+      {
+        "method": "GET",
+        "path": "/customers/{customer_id}/summary",
+        "file": "services/api_gateway/app.py",
+        "line": 1346
+      },
+      {
+        "method": "GET",
+        "path": "/customers/{customer_id}/vehicles",
+        "file": "services/api_gateway/app.py",
+        "line": 477
+      },
+      {
+        "method": "POST",
+        "path": "/customers/{customer_id}/vehicles",
+        "file": "services/api_gateway/app.py",
+        "line": 459
+      },
+      {
+        "method": "GET",
+        "path": "/health",
+        "file": "services/api_gateway/app.py",
+        "line": 213
+      },
+      {
+        "method": "GET",
+        "path": "/me/notifications",
+        "file": "services/api_gateway/app.py",
+        "line": 1210
+      },
+      {
+        "method": "PATCH",
+        "path": "/me/notifications/read-all",
+        "file": "services/api_gateway/app.py",
+        "line": 1238
+      },
+      {
+        "method": "GET",
+        "path": "/me/notifications/unread-count",
+        "file": "services/api_gateway/app.py",
+        "line": 1226
+      },
+      {
+        "method": "PATCH",
+        "path": "/me/notifications/{notification_id}/read",
+        "file": "services/api_gateway/app.py",
+        "line": 1250
+      },
+      {
+        "method": "GET",
+        "path": "/me/vehicles",
+        "file": "services/api_gateway/app.py",
+        "line": 397
+      },
+      {
+        "method": "POST",
+        "path": "/me/vehicles",
+        "file": "services/api_gateway/app.py",
+        "line": 409
+      },
+      {
+        "method": "POST",
+        "path": "/payments",
+        "file": "services/api_gateway/app.py",
+        "line": 1329
+      },
+      {
+        "method": "POST",
+        "path": "/quotes",
+        "file": "services/api_gateway/app.py",
+        "line": 1057
+      },
+      {
+        "method": "GET",
+        "path": "/quotes/{quote_id}",
+        "file": "services/api_gateway/app.py",
+        "line": 1092
+      },
+      {
+        "method": "POST",
+        "path": "/quotes/{quote_id}/items",
+        "file": "services/api_gateway/app.py",
+        "line": 1074
+      },
+      {
+        "method": "DELETE",
+        "path": "/quotes/{quote_id}/items/{item_id}",
+        "file": "services/api_gateway/app.py",
+        "line": 1121
+      },
+      {
+        "method": "PATCH",
+        "path": "/quotes/{quote_id}/items/{item_id}",
+        "file": "services/api_gateway/app.py",
+        "line": 1106
+      },
+      {
+        "method": "PATCH",
+        "path": "/quotes/{quote_id}/status",
+        "file": "services/api_gateway/app.py",
+        "line": 1132
+      },
+      {
+        "method": "POST",
+        "path": "/recommendations",
+        "file": "services/api_gateway/app.py",
+        "line": 1193
+      },
+      {
+        "method": "GET",
+        "path": "/reports/workshops",
+        "file": "services/api_gateway/app.py",
+        "line": 246
+      },
+      {
+        "method": "POST",
+        "path": "/service-carts",
+        "file": "services/api_gateway/app.py",
+        "line": 661
+      },
+      {
+        "method": "GET",
+        "path": "/service-carts/{cart_id}",
+        "file": "services/api_gateway/app.py",
+        "line": 701
+      },
+      {
+        "method": "POST",
+        "path": "/service-carts/{cart_id}/checkout",
+        "file": "services/api_gateway/app.py",
+        "line": 771
+      },
+      {
+        "method": "POST",
+        "path": "/service-carts/{cart_id}/items",
+        "file": "services/api_gateway/app.py",
+        "line": 715
+      },
+      {
+        "method": "DELETE",
+        "path": "/service-carts/{cart_id}/items/{item_id}",
+        "file": "services/api_gateway/app.py",
+        "line": 754
+      },
+      {
+        "method": "PATCH",
+        "path": "/service-carts/{cart_id}/items/{item_id}",
+        "file": "services/api_gateway/app.py",
+        "line": 735
+      },
+      {
+        "method": "GET",
+        "path": "/service-carts/{cart_id}/summary",
+        "file": "services/api_gateway/app.py",
+        "line": 708
+      },
+      {
+        "method": "GET",
+        "path": "/services",
+        "file": "services/api_gateway/app.py",
+        "line": 613
+      },
+      {
+        "method": "POST",
+        "path": "/services",
+        "file": "services/api_gateway/app.py",
+        "line": 596
+      },
+      {
+        "method": "GET",
+        "path": "/services/{service_id}",
+        "file": "services/api_gateway/app.py",
+        "line": 626
+      },
+      {
+        "method": "PATCH",
+        "path": "/services/{service_id}",
+        "file": "services/api_gateway/app.py",
+        "line": 633
+      },
+      {
+        "method": "GET",
+        "path": "/services/{service_id}/price",
+        "file": "services/api_gateway/app.py",
+        "line": 649
+      },
+      {
+        "method": "POST",
+        "path": "/vehicle-intakes",
+        "file": "services/api_gateway/app.py",
+        "line": 791
+      },
+      {
+        "method": "GET",
+        "path": "/vehicle-intakes/{intake_id}",
+        "file": "services/api_gateway/app.py",
+        "line": 823
+      },
+      {
+        "method": "GET",
+        "path": "/vehicles/by-plate/{plate}",
+        "file": "services/api_gateway/app.py",
+        "line": 506
+      },
+      {
+        "method": "GET",
+        "path": "/vehicles/by-vin/{vin}",
+        "file": "services/api_gateway/app.py",
+        "line": 513
+      },
+      {
+        "method": "GET",
+        "path": "/vehicles/{vehicle_id}",
+        "file": "services/api_gateway/app.py",
+        "line": 485
+      },
+      {
+        "method": "PATCH",
+        "path": "/vehicles/{vehicle_id}",
+        "file": "services/api_gateway/app.py",
+        "line": 490
+      },
+      {
+        "method": "GET",
+        "path": "/vehicles/{vehicle_id}/history",
+        "file": "services/api_gateway/app.py",
+        "line": 847
+      },
+      {
+        "method": "GET",
+        "path": "/vehicles/{vehicle_id}/intakes",
+        "file": "services/api_gateway/app.py",
+        "line": 835
+      },
+      {
+        "method": "GET",
+        "path": "/vehicles/{vehicle_id}/recommendations",
+        "file": "services/api_gateway/app.py",
+        "line": 520
+      },
+      {
+        "method": "GET",
+        "path": "/work-orders",
+        "file": "services/api_gateway/app.py",
+        "line": 958
+      },
+      {
+        "method": "POST",
+        "path": "/work-orders",
+        "file": "services/api_gateway/app.py",
+        "line": 934
+      },
+      {
+        "method": "GET",
+        "path": "/work-orders/{order_id}",
+        "file": "services/api_gateway/app.py",
+        "line": 984
+      },
+      {
+        "method": "POST",
+        "path": "/work-orders/{order_id}/accept",
+        "file": "services/api_gateway/app.py",
+        "line": 1008
+      },
+      {
+        "method": "GET",
+        "path": "/work-orders/{order_id}/evidence",
+        "file": "services/api_gateway/app.py",
+        "line": 1179
+      },
+      {
+        "method": "POST",
+        "path": "/work-orders/{order_id}/evidence",
+        "file": "services/api_gateway/app.py",
+        "line": 1161
+      },
+      {
+        "method": "PATCH",
+        "path": "/work-orders/{order_id}/status",
+        "file": "services/api_gateway/app.py",
+        "line": 992
+      },
+      {
+        "method": "POST",
+        "path": "/work-orders/{order_id}/tasks",
+        "file": "services/api_gateway/app.py",
+        "line": 1022
+      },
+      {
+        "method": "PATCH",
+        "path": "/work-orders/{order_id}/tasks/{task_id}/status",
+        "file": "services/api_gateway/app.py",
+        "line": 1040
+      },
+      {
+        "method": "PATCH",
+        "path": "/workshop-notifications/{notification_id}/read",
+        "file": "services/api_gateway/app.py",
+        "line": 1315
+      },
+      {
+        "method": "GET",
+        "path": "/workshops",
+        "file": "services/api_gateway/app.py",
+        "line": 549
+      },
+      {
+        "method": "POST",
+        "path": "/workshops",
+        "file": "services/api_gateway/app.py",
+        "line": 532
+      },
+      {
+        "method": "GET",
+        "path": "/workshops/{workshop_id}",
+        "file": "services/api_gateway/app.py",
+        "line": 561
+      },
+      {
+        "method": "PATCH",
+        "path": "/workshops/{workshop_id}",
+        "file": "services/api_gateway/app.py",
+        "line": 568
+      },
+      {
+        "method": "GET",
+        "path": "/workshops/{workshop_id}/notifications",
+        "file": "services/api_gateway/app.py",
+        "line": 1271
+      },
+      {
+        "method": "PATCH",
+        "path": "/workshops/{workshop_id}/notifications/read-all",
+        "file": "services/api_gateway/app.py",
+        "line": 1301
+      },
+      {
+        "method": "GET",
+        "path": "/workshops/{workshop_id}/notifications/unread-count",
+        "file": "services/api_gateway/app.py",
+        "line": 1287
+      },
+      {
+        "method": "GET",
+        "path": "/workshops/{workshop_id}/services",
+        "file": "services/api_gateway/app.py",
+        "line": 584
+      },
+      {
+        "method": "POST",
+        "path": "/api/activation/complete",
+        "file": "services/api_gateway/web.py",
+        "line": 213
+      },
+      {
+        "method": "POST",
+        "path": "/api/activation/validate",
+        "file": "services/api_gateway/web.py",
+        "line": 209
+      },
+      {
+        "method": "POST",
+        "path": "/api/auth/login",
+        "file": "services/api_gateway/web.py",
+        "line": 154
+      },
+      {
+        "method": "POST",
+        "path": "/api/auth/logout",
+        "file": "services/api_gateway/web.py",
+        "line": 170
+      },
+      {
+        "method": "GET",
+        "path": "/api/auth/session",
+        "file": "services/api_gateway/web.py",
+        "line": 166
+      },
+      {
+        "method": "POST",
+        "path": "/api/auth/workshops",
+        "file": "services/api_gateway/web.py",
+        "line": 135
+      },
+      {
+        "method": "GET",
+        "path": "/api/health",
+        "file": "services/api_gateway/web.py",
+        "line": 131
+      },
+      {
+        "method": "POST",
+        "path": "/api/workshop/activation",
+        "file": "services/api_gateway/web.py",
+        "line": 205
+      },
+      {
+        "method": "POST",
+        "path": "/api/workshop/intake",
+        "file": "services/api_gateway/web.py",
+        "line": 182
+      },
+      {
+        "method": "GET",
+        "path": "/api/workshops",
+        "file": "services/api_gateway/web.py",
+        "line": 176
+      }
+    ],
+    "customer_service": [
+      {
+        "method": "GET",
+        "path": "/customers",
+        "file": "services/customer_service/app.py",
+        "line": 114
+      },
+      {
+        "method": "POST",
+        "path": "/customers",
+        "file": "services/customer_service/app.py",
+        "line": 92
+      },
+      {
+        "method": "GET",
+        "path": "/customers/{customer_id}",
+        "file": "services/customer_service/app.py",
+        "line": 121
+      },
+      {
+        "method": "GET",
+        "path": "/customers/{customer_id}/vehicles",
+        "file": "services/customer_service/app.py",
+        "line": 178
+      },
+      {
+        "method": "POST",
+        "path": "/customers/{customer_id}/vehicles",
+        "file": "services/customer_service/app.py",
+        "line": 132
+      },
+      {
+        "method": "GET",
+        "path": "/health",
+        "file": "services/customer_service/app.py",
+        "line": 87
+      },
+      {
+        "method": "GET",
+        "path": "/vehicles/by-plate/{plate}",
+        "file": "services/customer_service/app.py",
+        "line": 239
+      },
+      {
+        "method": "GET",
+        "path": "/vehicles/by-vin/{vin}",
+        "file": "services/customer_service/app.py",
+        "line": 250
+      },
+      {
+        "method": "GET",
+        "path": "/vehicles/{vehicle_id}",
+        "file": "services/customer_service/app.py",
+        "line": 193
+      },
+      {
+        "method": "PATCH",
+        "path": "/vehicles/{vehicle_id}",
+        "file": "services/customer_service/app.py",
+        "line": 204
+      },
+      {
+        "method": "POST",
+        "path": "/internal/web/customers",
+        "file": "services/customer_service/web.py",
+        "line": 37
+      },
+      {
+        "method": "DELETE",
+        "path": "/internal/web/customers/{customer_id}",
+        "file": "services/customer_service/web.py",
+        "line": 57
+      },
+      {
+        "method": "POST",
+        "path": "/internal/web/vehicles/lookup",
+        "file": "services/customer_service/web.py",
+        "line": 63
+      }
+    ],
+    "identity_service": [
+      {
+        "method": "POST",
+        "path": "/auth/client/register",
+        "file": "services/identity_service/app.py",
+        "line": 142
+      },
+      {
+        "method": "POST",
+        "path": "/auth/login",
+        "file": "services/identity_service/app.py",
+        "line": 223
+      },
+      {
+        "method": "POST",
+        "path": "/auth/logout",
+        "file": "services/identity_service/app.py",
+        "line": 267
+      },
+      {
+        "method": "GET",
+        "path": "/auth/public-key",
+        "file": "services/identity_service/app.py",
+        "line": 137
+      },
+      {
+        "method": "POST",
+        "path": "/auth/staff/login",
+        "file": "services/identity_service/app.py",
+        "line": 224
+      },
+      {
+        "method": "POST",
+        "path": "/auth/staff/register",
+        "file": "services/identity_service/app.py",
+        "line": 177
+      },
+      {
+        "method": "GET",
+        "path": "/health",
+        "file": "services/identity_service/app.py",
+        "line": 132
+      },
+      {
+        "method": "POST",
+        "path": "/sessions/validate",
+        "file": "services/identity_service/app.py",
+        "line": 245
+      },
+      {
+        "method": "POST",
+        "path": "/internal/web/accounts",
+        "file": "services/identity_service/web.py",
+        "line": 58
+      },
+      {
+        "method": "POST",
+        "path": "/internal/web/accounts/lookup",
+        "file": "services/identity_service/web.py",
+        "line": 105
+      },
+      {
+        "method": "DELETE",
+        "path": "/internal/web/accounts/{user_id}",
+        "file": "services/identity_service/web.py",
+        "line": 95
+      },
+      {
+        "method": "POST",
+        "path": "/internal/web/accounts/{user_id}/commit",
+        "file": "services/identity_service/web.py",
+        "line": 81
+      },
+      {
+        "method": "POST",
+        "path": "/internal/web/activation/complete",
+        "file": "services/identity_service/web.py",
+        "line": 147
+      },
+      {
+        "method": "POST",
+        "path": "/internal/web/activation/renew",
+        "file": "services/identity_service/web.py",
+        "line": 130
+      },
+      {
+        "method": "POST",
+        "path": "/internal/web/activation/validate",
+        "file": "services/identity_service/web.py",
+        "line": 141
+      },
+      {
+        "method": "POST",
+        "path": "/internal/web/login",
+        "file": "services/identity_service/web.py",
+        "line": 115
+      }
+    ],
+    "workshop_service": [
+      {
+        "method": "GET",
+        "path": "/admin/dashboard",
+        "file": "services/workshop_service/app.py",
+        "line": 843
+      },
+      {
+        "method": "GET",
+        "path": "/appointments",
+        "file": "services/workshop_service/app.py",
+        "line": 1758
+      },
+      {
+        "method": "POST",
+        "path": "/appointments",
+        "file": "services/workshop_service/app.py",
+        "line": 1672
+      },
+      {
+        "method": "GET",
+        "path": "/appointments/{appointment_id}",
+        "file": "services/workshop_service/app.py",
+        "line": 1785
+      },
+      {
+        "method": "PATCH",
+        "path": "/appointments/{appointment_id}/status",
+        "file": "services/workshop_service/app.py",
+        "line": 1791
+      },
+      {
+        "method": "GET",
+        "path": "/customers/{customer_id}/notifications",
+        "file": "services/workshop_service/app.py",
+        "line": 2204
+      },
+      {
+        "method": "PATCH",
+        "path": "/customers/{customer_id}/notifications/read-all",
+        "file": "services/workshop_service/app.py",
+        "line": 2233
+      },
+      {
+        "method": "GET",
+        "path": "/customers/{customer_id}/notifications/unread-count",
+        "file": "services/workshop_service/app.py",
+        "line": 2219
+      },
+      {
+        "method": "GET",
+        "path": "/health",
+        "file": "services/workshop_service/app.py",
+        "line": 838
+      },
+      {
+        "method": "GET",
+        "path": "/notifications/{notification_id}",
+        "file": "services/workshop_service/app.py",
+        "line": 2252
+      },
+      {
+        "method": "PATCH",
+        "path": "/notifications/{notification_id}/read",
+        "file": "services/workshop_service/app.py",
+        "line": 2347
+      },
+      {
+        "method": "POST",
+        "path": "/payments",
+        "file": "services/workshop_service/app.py",
+        "line": 2367
+      },
+      {
+        "method": "POST",
+        "path": "/quotes",
+        "file": "services/workshop_service/app.py",
+        "line": 2039
+      },
+      {
+        "method": "GET",
+        "path": "/quotes/{quote_id}",
+        "file": "services/workshop_service/app.py",
+        "line": 2068
+      },
+      {
+        "method": "POST",
+        "path": "/quotes/{quote_id}/items",
+        "file": "services/workshop_service/app.py",
+        "line": 2074
+      },
+      {
+        "method": "DELETE",
+        "path": "/quotes/{quote_id}/items/{item_id}",
+        "file": "services/workshop_service/app.py",
+        "line": 2104
+      },
+      {
+        "method": "PATCH",
+        "path": "/quotes/{quote_id}/items/{item_id}",
+        "file": "services/workshop_service/app.py",
+        "line": 2083
+      },
+      {
+        "method": "PATCH",
+        "path": "/quotes/{quote_id}/status",
+        "file": "services/workshop_service/app.py",
+        "line": 2115
+      },
+      {
+        "method": "POST",
+        "path": "/recommendations",
+        "file": "services/workshop_service/app.py",
+        "line": 2167
+      },
+      {
+        "method": "GET",
+        "path": "/reports/workshops",
+        "file": "services/workshop_service/app.py",
+        "line": 929
+      },
+      {
+        "method": "POST",
+        "path": "/service-carts",
+        "file": "services/workshop_service/app.py",
+        "line": 1233
+      },
+      {
+        "method": "GET",
+        "path": "/service-carts/{cart_id}",
+        "file": "services/workshop_service/app.py",
+        "line": 1277
+      },
+      {
+        "method": "POST",
+        "path": "/service-carts/{cart_id}/checkout",
+        "file": "services/workshop_service/app.py",
+        "line": 1339
+      },
+      {
+        "method": "POST",
+        "path": "/service-carts/{cart_id}/items",
+        "file": "services/workshop_service/app.py",
+        "line": 1289
+      },
+      {
+        "method": "DELETE",
+        "path": "/service-carts/{cart_id}/items/{item_id}",
+        "file": "services/workshop_service/app.py",
+        "line": 1320
+      },
+      {
+        "method": "PATCH",
+        "path": "/service-carts/{cart_id}/items/{item_id}",
+        "file": "services/workshop_service/app.py",
+        "line": 1303
+      },
+      {
+        "method": "GET",
+        "path": "/service-carts/{cart_id}/summary",
+        "file": "services/workshop_service/app.py",
+        "line": 1283
+      },
+      {
+        "method": "GET",
+        "path": "/services",
+        "file": "services/workshop_service/app.py",
+        "line": 1153
+      },
+      {
+        "method": "POST",
+        "path": "/services",
+        "file": "services/workshop_service/app.py",
+        "line": 1113
+      },
+      {
+        "method": "GET",
+        "path": "/services/{service_id}",
+        "file": "services/workshop_service/app.py",
+        "line": 1173
+      },
+      {
+        "method": "PATCH",
+        "path": "/services/{service_id}",
+        "file": "services/workshop_service/app.py",
+        "line": 1179
+      },
+      {
+        "method": "GET",
+        "path": "/services/{service_id}/price",
+        "file": "services/workshop_service/app.py",
+        "line": 1209
+      },
+      {
+        "method": "POST",
+        "path": "/vehicle-intakes",
+        "file": "services/workshop_service/app.py",
+        "line": 1565
+      },
+      {
+        "method": "GET",
+        "path": "/vehicle-intakes/{intake_id}",
+        "file": "services/workshop_service/app.py",
+        "line": 1612
+      },
+      {
+        "method": "GET",
+        "path": "/vehicles/{vehicle_id}/history",
+        "file": "services/workshop_service/app.py",
+        "line": 1628
+      },
+      {
+        "method": "GET",
+        "path": "/vehicles/{vehicle_id}/intakes",
+        "file": "services/workshop_service/app.py",
+        "line": 1618
+      },
+      {
+        "method": "GET",
+        "path": "/vehicles/{vehicle_id}/recommendations",
+        "file": "services/workshop_service/app.py",
+        "line": 2194
+      },
+      {
+        "method": "GET",
+        "path": "/work-orders",
+        "file": "services/workshop_service/app.py",
+        "line": 1852
+      },
+      {
+        "method": "POST",
+        "path": "/work-orders",
+        "file": "services/workshop_service/app.py",
+        "line": 1805
+      },
+      {
+        "method": "GET",
+        "path": "/work-orders/{order_id}",
+        "file": "services/workshop_service/app.py",
+        "line": 1886
+      },
+      {
+        "method": "POST",
+        "path": "/work-orders/{order_id}/accept",
+        "file": "services/workshop_service/app.py",
+        "line": 1917
+      },
+      {
+        "method": "GET",
+        "path": "/work-orders/{order_id}/evidence",
+        "file": "services/workshop_service/app.py",
+        "line": 2156
+      },
+      {
+        "method": "POST",
+        "path": "/work-orders/{order_id}/evidence",
+        "file": "services/workshop_service/app.py",
+        "line": 2135
+      },
+      {
+        "method": "PATCH",
+        "path": "/work-orders/{order_id}/status",
+        "file": "services/workshop_service/app.py",
+        "line": 1892
+      },
+      {
+        "method": "POST",
+        "path": "/work-orders/{order_id}/tasks",
+        "file": "services/workshop_service/app.py",
+        "line": 1950
+      },
+      {
+        "method": "PATCH",
+        "path": "/work-orders/{order_id}/tasks/{task_id}/status",
+        "file": "services/workshop_service/app.py",
+        "line": 1990
+      },
+      {
+        "method": "GET",
+        "path": "/workshop-notifications/{notification_id}",
+        "file": "services/workshop_service/app.py",
+        "line": 2315
+      },
+      {
+        "method": "PATCH",
+        "path": "/workshop-notifications/{notification_id}/read",
+        "file": "services/workshop_service/app.py",
+        "line": 2327
+      },
+      {
+        "method": "GET",
+        "path": "/workshops",
+        "file": "services/workshop_service/app.py",
+        "line": 1074
+      },
+      {
+        "method": "POST",
+        "path": "/workshops",
+        "file": "services/workshop_service/app.py",
+        "line": 1047
+      },
+      {
+        "method": "GET",
+        "path": "/workshops/{workshop_id}",
+        "file": "services/workshop_service/app.py",
+        "line": 1087
+      },
+      {
+        "method": "PATCH",
+        "path": "/workshops/{workshop_id}",
+        "file": "services/workshop_service/app.py",
+        "line": 1093
+      },
+      {
+        "method": "GET",
+        "path": "/workshops/{workshop_id}/notifications",
+        "file": "services/workshop_service/app.py",
+        "line": 2264
+      },
+      {
+        "method": "PATCH",
+        "path": "/workshops/{workshop_id}/notifications/read-all",
+        "file": "services/workshop_service/app.py",
+        "line": 2295
+      },
+      {
+        "method": "GET",
+        "path": "/workshops/{workshop_id}/notifications/unread-count",
+        "file": "services/workshop_service/app.py",
+        "line": 2280
+      },
+      {
+        "method": "GET",
+        "path": "/workshops/{workshop_id}/services",
+        "file": "services/workshop_service/app.py",
+        "line": 1226
+      },
+      {
+        "method": "GET",
+        "path": "/internal/web/orders",
+        "file": "services/workshop_service/web.py",
+        "line": 75
+      },
+      {
+        "method": "POST",
+        "path": "/internal/web/orders",
+        "file": "services/workshop_service/web.py",
+        "line": 54
+      },
+      {
+        "method": "DELETE",
+        "path": "/internal/web/orders/{order_id}",
+        "file": "services/workshop_service/web.py",
+        "line": 69
+      },
+      {
+        "method": "GET",
+        "path": "/internal/web/workshops",
+        "file": "services/workshop_service/web.py",
+        "line": 46
+      },
+      {
+        "method": "POST",
+        "path": "/internal/web/workshops",
+        "file": "services/workshop_service/web.py",
+        "line": 26
+      },
+      {
+        "method": "DELETE",
+        "path": "/internal/web/workshops/{workshop_id}",
+        "file": "services/workshop_service/web.py",
+        "line": 40
+      }
+    ]
+  },
+  "frontend_calls": [
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "line": 33,
+      "gateway_exact_route": true,
+      "gateway_route_after_stripping_api": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "line": 34,
+      "gateway_exact_route": true,
+      "gateway_route_after_stripping_api": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/workshops",
+      "line": 35,
+      "gateway_exact_route": true,
+      "gateway_route_after_stripping_api": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/session",
+      "line": 36,
+      "gateway_exact_route": true,
+      "gateway_route_after_stripping_api": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/workshops",
+      "line": 37,
+      "gateway_exact_route": true,
+      "gateway_route_after_stripping_api": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "line": 38,
+      "gateway_exact_route": true,
+      "gateway_route_after_stripping_api": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/workshop/intake",
+      "line": 39,
+      "gateway_exact_route": true,
+      "gateway_route_after_stripping_api": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/workshop/activation",
+      "line": 40,
+      "gateway_exact_route": true,
+      "gateway_route_after_stripping_api": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/activation/validate",
+      "line": 41,
+      "gateway_exact_route": true,
+      "gateway_route_after_stripping_api": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/activation/complete",
+      "line": 42,
+      "gateway_exact_route": true,
+      "gateway_route_after_stripping_api": false
+    }
+  ],
+  "summary": {
+    "gateway_route_count": 82,
+    "frontend_call_count": 10,
+    "frontend_unique_route_count": 9,
+    "exact_route_overlap": 10,
+    "missing_even_after_stripping_api": []
+  }
+}

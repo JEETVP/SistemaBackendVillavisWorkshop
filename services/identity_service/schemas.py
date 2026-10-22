@@ -40,6 +40,11 @@ class UserOut(BaseModel):
     customer_id: str | None
     primary_vehicle_id: str | None
     created_at: str
+    state: str = "active"
+    workshop_id: str | None = None
+    registration_workshop_id: str | None = None
+    web_position: str | None = None
+    web_cargo: str | None = None
 
 
 class TokenOut(BaseModel):

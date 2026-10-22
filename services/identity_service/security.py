@@ -19,7 +19,7 @@ def verify_password(password: str, password_hash: str) -> bool:
         algorithm, salt_hex, digest_hex = password_hash.split("$", 2)
     except ValueError:
         return False
-    if algorithm != "pbkdf2_sha256":
+    if algorithm not in {"pbkdf2_sha256", "node_scrypt"}:
         return False
 
     try:
@@ -27,7 +27,12 @@ def verify_password(password: str, password_hash: str) -> bool:
         expected = bytes.fromhex(digest_hex)
     except ValueError:
         return False
-    actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 120_000)
+    if algorithm == "node_scrypt":
+        # Node's scrypt used the hexadecimal salt as a UTF-8 string.
+        actual = hashlib.scrypt(password.encode("utf-8"), salt=salt_hex.encode("ascii"),
+                                n=16384, r=8, p=1, dklen=64, maxmem=64 * 1024 * 1024)
+    else:
+        actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 120_000)
     return hmac.compare_digest(actual, expected)
 
 

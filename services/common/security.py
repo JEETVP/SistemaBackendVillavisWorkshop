@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 TOKEN_ISSUER = "villavis-identity"
 TOKEN_AUDIENCE = "villavis-api"
-TOKEN_TTL_SECONDS = 3600
+TOKEN_TTL_SECONDS = int(os.getenv("JWT_TTL_SECONDS", "3600"))
 PRIVATE_KEY_PATH = os.getenv("IDENTITY_PRIVATE_KEY_PATH", "data/jwt_private.pem")
 
 

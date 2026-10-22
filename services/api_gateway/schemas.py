@@ -3,38 +3,8 @@ from __future__ import annotations
 from typing import Literal
 
 from pydantic import BaseModel, Field
-
-
-class CustomerCreate(BaseModel):
-    name: str = Field(min_length=2, max_length=120)
-    phone: str = Field(min_length=5, max_length=40)
-    email: str | None = Field(default=None, max_length=120)
-
-
-class VehicleCreate(BaseModel):
-    plate: str = Field(min_length=3, max_length=20)
-    vin: str = Field(min_length=5, max_length=17)
-    brand: str = Field(min_length=2, max_length=60)
-    model: str = Field(min_length=1, max_length=60)
-    year: int | None = Field(default=None, ge=1900, le=2100)
-    vehicle_type: str | None = Field(default=None, max_length=60)
-    color: str | None = Field(default=None, max_length=40)
-    engine_number: str | None = Field(default=None, max_length=80)
-    service_type: str | None = Field(default=None, max_length=60)
-    owner_name: str | None = Field(default=None, max_length=120)
-
-
-class VehicleUpdate(BaseModel):
-    plate: str | None = Field(default=None, min_length=3, max_length=20)
-    vin: str | None = Field(default=None, min_length=5, max_length=40)
-    brand: str | None = Field(default=None, min_length=2, max_length=60)
-    model: str | None = Field(default=None, min_length=1, max_length=60)
-    year: int | None = Field(default=None, ge=1900, le=2100)
-    vehicle_type: str | None = Field(default=None, max_length=60)
-    color: str | None = Field(default=None, max_length=40)
-    engine_number: str | None = Field(default=None, max_length=80)
-    service_type: str | None = Field(default=None, max_length=60)
-    owner_name: str | None = Field(default=None, max_length=120)
+from services.customer_service.schemas import CustomerCreate, VehicleCreate, VehicleUpdate
+from services.workshop_service.schemas import QuoteItemUpdate
 
 
 class VehicleAccountRegister(BaseModel):
@@ -66,7 +36,7 @@ class StaffUserRegister(BaseModel):
 
 
 class WorkshopCreate(BaseModel):
-    name: str = Field(min_length=2, max_length=120)
+    name: str = Field(min_length=1, max_length=120)
     address: str = Field(min_length=5, max_length=240)
     photo_url: str | None = Field(default=None, max_length=500)
     phone: str | None = Field(default=None, max_length=40)
@@ -75,7 +45,7 @@ class WorkshopCreate(BaseModel):
 
 
 class WorkshopUpdate(BaseModel):
-    name: str | None = Field(default=None, min_length=2, max_length=120)
+    name: str | None = Field(default=None, min_length=1, max_length=120)
     address: str | None = Field(default=None, min_length=5, max_length=240)
     photo_url: str | None = Field(default=None, max_length=500)
     phone: str | None = Field(default=None, max_length=40)
@@ -178,7 +148,7 @@ class WorkOrderCreate(BaseModel):
     workshop_id: str
     customer_id: str
     vehicle_id: str
-    description: str = Field(min_length=5, max_length=500)
+    description: str = Field(min_length=1, max_length=1000)
     priority: str = Field(default="normal", pattern="^(low|normal|high|urgent)$")
     appointment_id: str | None = None
 

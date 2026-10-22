@@ -1,0 +1,33 @@
+name: Backend CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      APP_ORIGIN: http://localhost:5173
+      INTERNAL_SERVICE_TOKEN: ci-service-token-not-a-production-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+      - name: Build production backend
+        run: docker build -t tallerplus-backend:ci .
+
+  release:
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AZURE_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request joint frontend/backend release after successful CI
+        env:
+          GH_TOKEN: ${{ secrets.FRONTEND_DISPATCH_TOKEN }}
+          BACKEND_SHA: ${{ github.sha }}
+        run: gh workflow run azure-release.yml --repo Jose-Esp-Ordas/TallerPlusWEB --ref main -f backend_ref="$BACKEND_SHA"

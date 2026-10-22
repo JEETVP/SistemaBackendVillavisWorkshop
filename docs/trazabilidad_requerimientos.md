@@ -6,12 +6,12 @@ Este documento resume como la implementacion actual cubre la propuesta de Villav
 
 | ID | Requerimiento | Estado backend | Endpoints principales |
 | --- | --- | --- | --- |
-| RF-01 | Busqueda/consulta segura de vehiculo por placa o serie | Implementado base | `POST /auth/login` valida placa+VIN; `GET /vehicles/by-plate/{plate}` queda para personal |
+| RF-01 | Busqueda/consulta segura de vehiculo por placa o serie | Implementado base | `GET /vehicles/by-plate/{plate}`, `GET /vehicles/by-vin/{vin}` para personal; `GET /vehicles/{vehicle_id}` verifica propietario. Login usa telefono y contrasena |
 | RF-02 | Registro y actualizacion de informacion del vehiculo | Implementado | `POST /customers/{customer_id}/vehicles`, `PATCH /vehicles/{vehicle_id}` |
 | RF-03 | Creacion de ordenes de trabajo | Implementado | `POST /work-orders`, `POST /service-carts/{cart_id}/checkout`, `GET /work-orders/{order_id}` |
 | RF-04 | Gestion de servicios requeridos | Implementado | `POST /services`, `GET /services`, `GET /services/{service_id}/price`, `POST /service-carts/{cart_id}/items`, `PATCH /service-carts/{cart_id}/items/{item_id}`, `DELETE /service-carts/{cart_id}/items/{item_id}`, `POST /work-orders/{order_id}/tasks` |
 | RF-05 | Generacion de cotizaciones | Implementado | `POST /quotes`, `POST /quotes/{quote_id}/items`; partidas pueden usar `service_id` + `cylinder_count` |
-| RF-06 | Modificacion de cotizaciones | Parcial | Se pueden agregar partidas y cambiar estado; falta editar/eliminar partidas |
+| RF-06 | Modificacion de cotizaciones | Implementado en backend | `POST /quotes/{quote_id}/items`, `PATCH /quotes/{quote_id}/items/{item_id}`, `DELETE /quotes/{quote_id}/items/{item_id}`; subtotal recalculado y bloqueo tras aceptar/rechazar. La autorizacion parcial de la UI sigue pendiente |
 | RF-07 | Consulta y aceptacion de cotizaciones | Implementado | `GET /quotes/{quote_id}`, `PATCH /quotes/{quote_id}/status` |
 | RF-08 | Evidencia fotografica | Parcial | `POST /vehicle-intakes` registra fotos de entrada como URL; `POST /work-orders/{order_id}/evidence` registra evidencia durante el servicio |
 | RF-09 | Historial y progreso de servicios | Implementado | `GET /vehicles/{vehicle_id}/history`, `GET /work-orders?vehicle_id=...`, `GET /work-orders/{order_id}`, `GET /customers/{customer_id}/summary` |
@@ -30,7 +30,7 @@ Este documento resume como la implementacion actual cubre la propuesta de Villav
 | --- | --- | --- |
 | RNF-01 | Mobile-first | Depende del frontend; el backend ya expone endpoints para vistas moviles |
 | RNF-02 | Rendimiento | Pendiente de medir cuando exista frontend y entorno de despliegue |
-| RNF-03 | Seguridad por rol | Implementado base con `identity_service`, token Bearer y acceso de cliente por placa+VIN |
+| RNF-03 | Seguridad por rol | Implementado base con `identity_service`, token Bearer y acceso con telefono y contrasena. La separacion de permisos por taller sigue pendiente |
 | RNF-04 | Disponibilidad | Preparado con Docker Compose; falta despliegue externo |
 
 ## Extension multi-taller
@@ -131,7 +131,7 @@ El backend expone datos agregados para el panel del taller y para reportes:
 
 ## Siguiente incremento sugerido
 
-1. Agregar edicion/eliminacion de partidas de cotizacion.
+1. Unificar el contrato con TallerPlusWEB y completar recepcion, activacion y permisos por taller, segun [auditoria de sincronizacion](auditoria_sincronizacion.md).
 2. Conectar Stripe real mediante checkout session y webhooks.
 3. Agregar carga real de imagenes para evidencias y fotos de taller.
 4. Agregar exportacion PDF/CSV para reportes administrativos.

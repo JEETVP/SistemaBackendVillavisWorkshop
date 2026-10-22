@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, Query, status
 
 from services.common.database import connect, db_path_from_env
 from services.common.time import utc_now_iso
+from services.workshop_service.web import create_router, init_web_workshops
 from services.workshop_service.schemas import (
     AppointmentCreate,
     AppointmentDetail,
@@ -20,8 +21,11 @@ from services.workshop_service.schemas import (
     EvidenceOut,
     PaymentCreate,
     PaymentOut,
+    PaymentStatus,
+    Priority,
     QuoteCreate,
     QuoteItemCreate,
+    QuoteItemUpdate,
     QuoteOut,
     QuoteStatus,
     QuoteStatusUpdate,
@@ -77,8 +81,8 @@ def ensure_columns(db: sqlite3.Connection, table: str, columns: dict[str, str]) 
             db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
 
 
-def init_db() -> None:
-    with connect(DB_PATH) as db:
+def init_db(db_path: str | None = None) -> None:
+    with connect(db_path or DB_PATH) as db:
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS workshops (
@@ -782,6 +786,11 @@ def quote_with_items(db: sqlite3.Connection, quote_id: str) -> dict:
     return data
 
 
+def ensure_quote_editable(quote: dict) -> None:
+    if quote["status"] in {QuoteStatus.accepted.value, QuoteStatus.rejected.value}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Resolved quotes cannot be edited")
+
+
 def appointment_with_services(db: sqlite3.Connection, appointment_id: str) -> dict:
     appointment = db.execute(
         "SELECT * FROM appointments WHERE id = ?",
@@ -822,6 +831,8 @@ def intake_with_photos(db: sqlite3.Connection, intake_id: str) -> dict:
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
+    with connect(DB_PATH) as db:
+        init_web_workshops(db)
 
 
 @app.get("/health")
@@ -2063,8 +2074,40 @@ def get_quote(quote_id: str) -> dict:
 @app.post("/quotes/{quote_id}/items", response_model=QuoteOut, status_code=status.HTTP_201_CREATED)
 def add_quote_item(quote_id: str, payload: QuoteItemCreate) -> dict:
     with connect(DB_PATH) as db:
-        quote_with_items(db, quote_id)
+        ensure_quote_editable(quote_with_items(db, quote_id))
         add_quote_item_row(db, quote_id, payload)
+        recalculate_quote(db, quote_id)
+        return quote_with_items(db, quote_id)
+
+
+@app.patch("/quotes/{quote_id}/items/{item_id}", response_model=QuoteOut)
+def update_quote_item(quote_id: str, item_id: str, payload: QuoteItemUpdate) -> dict:
+    changes = payload.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update")
+    with connect(DB_PATH) as db:
+        ensure_quote_editable(quote_with_items(db, quote_id))
+        item = db.execute("SELECT * FROM quote_items WHERE id = ? AND quote_id = ?", (item_id, quote_id)).fetchone()
+        if not item:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote item not found")
+        updated = {**dict(item), **changes}
+        updated["total"] = updated["quantity"] * updated["unit_price"]
+        db.execute(
+            """UPDATE quote_items SET description = :description, quantity = :quantity,
+               unit_price = :unit_price, total = :total WHERE id = :id AND quote_id = :quote_id""",
+            updated,
+        )
+        recalculate_quote(db, quote_id)
+        return quote_with_items(db, quote_id)
+
+
+@app.delete("/quotes/{quote_id}/items/{item_id}", response_model=QuoteOut)
+def delete_quote_item(quote_id: str, item_id: str) -> dict:
+    with connect(DB_PATH) as db:
+        ensure_quote_editable(quote_with_items(db, quote_id))
+        deleted = db.execute("DELETE FROM quote_items WHERE id = ? AND quote_id = ?", (item_id, quote_id))
+        if deleted.rowcount == 0:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote item not found")
         recalculate_quote(db, quote_id)
         return quote_with_items(db, quote_id)
 
@@ -2074,6 +2117,9 @@ def update_quote_status(quote_id: str, payload: QuoteStatusUpdate) -> dict:
     now = utc_now_iso()
     with connect(DB_PATH) as db:
         quote = quote_with_items(db, quote_id)
+        if quote["status"] == payload.status.value:
+            return quote
+        ensure_quote_editable(quote)
         db.execute(
             "UPDATE quotes SET status = ?, updated_at = ? WHERE id = ?",
             (payload.status.value, now, quote_id),
@@ -2339,3 +2385,9 @@ def register_payment(payload: PaymentCreate) -> dict:
             payment,
         )
     return payment
+
+
+app.include_router(create_router(lambda: DB_PATH))
+
+from services.workshop_service.web_sync import create_router as create_sync_router
+app.include_router(create_sync_router(lambda: DB_PATH))
